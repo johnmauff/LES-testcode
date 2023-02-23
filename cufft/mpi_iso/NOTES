@@ -3,4 +3,4 @@ on gust, need to execute:
 module load nvhpc
 module load cuda
 # Build testx
-make USE_OPENACC=true USE_MPI=true
+make USE_OPENACC=true USE_MPI=true USE_ISO=true
