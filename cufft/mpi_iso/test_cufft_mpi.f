@@ -1154,3 +1154,25 @@
  
       return
       end
+! ======================================================================
+
+      subroutine init_nprt
+
+      ! ---- routine to initialize per-task files
+
+      use pars
+      character(len=80) :: path_prt
+
+      ! ---- unit number for standard print out for each mpi task
+
+      nprt = 1
+
+      ! ---- open unit for standard printout
+
+      path_prt = './run/xxxxx.out'
+      write(path_prt(7:11),'(i5.5)') myid
+      open(nprt,file=path_prt,form='formatted')
+
+      return
+      end subroutine init_nprt
+
