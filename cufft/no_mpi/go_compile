@@ -1,0 +1,22 @@
+#!/bin/ksh
+
+compdir=./compile/
+mkdir -p $compdir
+cwd=`pwd`
+
+cd $compdir
+
+cp $cwd/$1 .
+
+#nvfortran -r8 -O2 -Minfo -stdpar -cuda -cudalib=cufft $1
+nvfortran -r8 -O2 -Minfo -cuda -cudalib=cufft $1
+
+mv a.out $cwd/.
+cd $cwd
+
+
+# --- save
+
+#nvfortran -r8 -O0 -g -traceback -Ktrap=fp -Kieee -Minfo -cuda -cudalib=cufft $1
+#nvfortran -r8 -O0 -Minfo -Mpreprocess -cuda -cudalib=cufft $1
+

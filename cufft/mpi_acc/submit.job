@@ -1,0 +1,22 @@
+#!/bin/bash -l
+#PBS -N test_cufft
+#PBS -A NMMM0008
+#PBS -l select=2:ncpus=4:mpiprocs=4:ngpus=4
+#PBS -l walltime=01:00
+#PBS -q main
+#PBS -o /glade/u/home/patton/logs/
+#PBS -j oe
+
+module purge
+module load nvhpc
+module load cuda
+module load cray-mpich
+
+export MPICH_GPU_SUPPORT_ENABLED=1
+
+#export PALS_NRANKS=2
+#export PALS_PPN=4
+#export PALS_DEPTH=2
+#export PALS_CPU_BIND=depth
+
+mpiexec -n 8 -ppn 4 get_local_rank ./a.out > test_cufft.out

@@ -1,0 +1,4 @@
+no_mpi:  codes testing cufft with no mpi in the mix
+   mpi:  codes testing cufft with mpi    
+
+NOTE: the 'with-mpi' version does not yet take advantage of GPU-aware (GPU-to-GPU) MPI 

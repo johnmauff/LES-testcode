@@ -1,0 +1,8 @@
+need to load:
+
+   module load nvhpc
+
+
+for running interactively on casper:
+
+   execcasper -q gpudev -l select=1:ncpus=1:ngpus=1 -l walltime=00:10:00

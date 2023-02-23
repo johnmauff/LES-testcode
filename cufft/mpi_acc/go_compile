@@ -1,0 +1,24 @@
+#!/bin/ksh
+
+compdir=./compile/
+mkdir -p $compdir
+cwd=`pwd`
+
+cd $compdir
+
+cp $cwd/$1 .
+
+mpif90 -r8 -O0 -gpu=cc70,cc80 -Minfo -acc -cuda -cudalib=cufft $1
+
+#mpif90 -r8 -O0 -Minfo -acc -cuda -cudalib=cufft $1
+
+#ftn -s real64 -O0 -h acc -h target-accel=nvidia80 -cuda -cudalib=cufft $1
+
+mv a.out $cwd/.
+cd $cwd
+
+
+# --- save
+
+#mpif90 -r8 -O0 -g -traceback -Ktrap=fp -Kieee -Minfo -cuda -cudalib=cufft $1
+
