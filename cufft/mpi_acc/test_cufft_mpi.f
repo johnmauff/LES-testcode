@@ -237,11 +237,19 @@
 
       ! ---- perform tests
 
-      jj = 13
 
+      write(*,*) 'Calling test_xderiv'
+      jj = iys   ! index for printout
       call test_xderiv(jj)
+      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+      write(*,*) 'Calling test_yderiv'
+      jj = jxs   ! index for printout
       call test_yderiv(jj)
+      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+      write(*,*) 'Calling test_fft2d'
+      jj = iys   ! index for printout
       call test_fft2d(jj)
+      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
 
       ! ---- clean up
 
@@ -296,7 +304,7 @@
 
       if (jj >= iys .and. jj <= iye) then
          do i = 1,nnx
-            ai(i)  = a(i,jj,1)
+            ai(i)  = a(i,jj,izs)
          enddo
       endif
 
@@ -478,9 +486,9 @@
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
       ! ---- for printout
-!$acc data copyout(at,ayt)
+!$acc data copy(at,ayt)
 
-      call xtoy_trans(a(1,iys,izs),at,nnx,nny,iys,iye,jx_s,jx_e,
+      call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
@@ -1197,6 +1205,8 @@
       mxe = mx_e(myid)
       izs = iz_s(myid)
       ize = iz_e(myid)
+      iss = is_s(myid)
+      ise = is_e(myid)
 
 !     write(6,123)myid,izs,ize,iys,iye,iss,ise
 !123  format('myid = ',i6,' izs,ize = ',2i6,
