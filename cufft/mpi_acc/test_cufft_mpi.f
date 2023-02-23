@@ -46,6 +46,8 @@
          real, dimension(nnx) :: xkn, xk
          real, dimension(nny) :: ykn, yk
 
+         integer :: nprt
+
       end module pars
 
 ! ======================================================================
@@ -206,6 +208,7 @@
       call mpi_comm_rank(mpi_comm_world,myid,ierr)
       call mpi_comm_size(mpi_comm_world,numprocs,ierr)
 
+      call init_nprt
       call gridd
       call build_wavenumbers
       call mpi_range
@@ -317,14 +320,14 @@
 
       if(PrintTestSignal) then
       if (jj >= iys .and. jj <= iye) then
-         write(6,*)
-         write(6,*) 'fft2d:'
+         write(nprt,*)
+         write(nprt,*) 'fft2d:'
 
          do i = 1,nnx
-            write(6,100) dble(i-1)*dx, ai(i), a(i,jj,1)
+            write(nprt,100) dble(i-1)*dx, ai(i), a(i,jj,izs)
          enddo
  100     format(' x = ',f,' , send = ',f,' , recv = ',f)
-         call flush(6)
+         call flush(nprt)
       endif
       endif
 
@@ -396,21 +399,21 @@
          end do
 !$acc update device(ax)
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
-      end do
 !$acc update host(ax)
+         if(PrintTestSignal) then
+         if (k == izs) then
+            write(nprt,*)
+            write(nprt,*) 'xderiv:'
 
-      if(PrintTestSignal) then
-      if (jj >= iys .and. jj <= iye) then
-         write(6,*)
-         write(6,*) 'xderiv:'
+            do i = 1,nnx
+               write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
+            enddo
+ 100        format(' x = ',f,' , a = ',f,' , ax = ',f)
+            call flush(nprt)
+         endif
+         endif
+      end do
 
-         do i = 1,nnx
-            write(6,100) dble(i-1)*dx,a(i,jj,1),ax(i,jj)
-         enddo
- 100     format(' x = ',f,' , a = ',f,' , ax = ',f)
-         call flush(6)
-      endif
-      endif
 !$acc parallel loop gang vector collapse(2) default(present)
       do j=iys,iye
       do i=1,nnx
@@ -477,24 +480,25 @@
       ! ---- for printout
 !$acc data copyout(at,ayt)
 
-      call xtoy_trans(a(1,iys,izs),at,nnx,nny,ixs,ixe,ix_s,ix_e,
+      call xtoy_trans(a(1,iys,izs),at,nnx,nny,iys,iye,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 !$acc end data
 
       if(PrintTestSignal) then
-      if (jj >= ixs .and. jj <= ixe) then
-         write(6,*)
-         write(6,*) 'yderiv:'
+      do i=1,nnx
+         if (i==jj) then
+           write(nprt,*)
+           write(nprt,*) 'yderiv:'
 
-         i = jj
-         do j = 1,nny
-            write(6,100) dble(j-1)*dy,at(j,i,1),ayt(j,i,1)
-         enddo
- 100     format(' y = ',f,' , a = ',f,' , ay = ',f)
-         call flush(6)
-      endif
+           do j = 1,nny
+              write(nprt,100) dble(j-1)*dy,at(j,i,izs),ayt(j,i,izs)
+           enddo
+ 100       format(' y = ',f,' , a = ',f,' , ay = ',f)
+           call flush(nprt)
+         endif
+      enddo
       endif
       ! next measure performance
       ! Initialize on the GPU
@@ -1219,3 +1223,25 @@
  
       return
       end
+! ======================================================================
+
+      subroutine init_nprt
+
+      ! ---- routine to initialize per-task files
+
+      use pars
+      character(len=80) :: path_prt
+
+      ! ---- unit number for standard print out for each mpi task
+
+      nprt = 1
+
+      ! ---- open unit for standard printout
+
+      path_prt = './run/xxxxx.out'
+      write(path_prt(7:11),'(i5.5)') myid
+      open(nprt,file=path_prt,form='formatted')
+
+      return
+      end subroutine init_nprt
+
