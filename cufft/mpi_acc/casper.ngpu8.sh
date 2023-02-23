@@ -18,4 +18,5 @@ export UCX_RNDV_SCHEME=put_zcopy
 export UCX_RNDV_THRESH=2
 
 
-mpirun -n 8 ./testx  >& 8v100.test_cufft.32.A.log
+mpirun -n 8 ./testx >& 8v100.test_cufft.32.A.log
+

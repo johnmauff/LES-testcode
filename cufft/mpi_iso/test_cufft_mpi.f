@@ -21,7 +21,7 @@
          integer, parameter :: nny = 32
          integer, parameter :: nnz = 32
 
-         integer, parameter :: ncpu_s = 2
+         integer, parameter :: ncpu_s = 8
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2

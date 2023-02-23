@@ -20,7 +20,7 @@
 
          integer, parameter :: nnx = 32
          integer, parameter :: nny = 32
-         integer, parameter :: nnz = 1
+         integer, parameter :: nnz = 32
 
          integer, parameter :: ncpu_s = 8
 

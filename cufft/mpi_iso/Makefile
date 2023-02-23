@@ -1,4 +1,6 @@
 # Makefile
+#
+# defaults
 USE_OPENACC_L = $(shell echo $(USE_OPENACC) | tr A-Z a-z)
 USE_ISO_L     = $(shell echo $(USE_ISO) | tr A-Z a-z)
 USE_MPI_L     = $(shell echo $(USE_MPI) | tr A-Z a-z)
