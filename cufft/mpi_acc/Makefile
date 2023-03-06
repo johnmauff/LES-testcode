@@ -8,7 +8,7 @@ USE_MPI_L     = $(shell echo $(USE_MPI) | tr A-Z a-z)
 # NVHPC compiler
 # ------------------------------
 ifeq (${FC},nvfortran)
-  OPTS +=  -r8 -O3 -gpu=cc70,cc80 -Minfo -acc -cuda -cudalib=cufft 
+  OPTS +=  -r8 -O3 -gpu=cc70,cc80 -acc -cuda -cudalib=cufft 
   ifeq (${USE_ISO_L},true)
     OPTS += -stdpar=gpu
   endif

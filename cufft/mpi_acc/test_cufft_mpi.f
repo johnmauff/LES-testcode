@@ -11,7 +11,7 @@
 
       module timing
           integer, parameter :: niter=10
-          logical, parameter :: PrintTestSignal=.false.
+          logical, parameter :: PrintTestSignal=.true.
       end module timing
 
       module pars
@@ -75,8 +75,8 @@
         real, allocatable :: xk_d(:), yk_d(:)
 !$acc declare create (xk_d,yk_d)
 
-        real, allocatable :: x_in(:,:), x_out(:,:),x_out2(:,:),
-     +                       y_in(:,:), y_out(:,:),y_out2(:,:),
+        real, allocatable :: x_in(:,:), x_out(:,:), x_out2(:,:),
+     +                       y_in(:,:), y_out(:,:), y_out2(:,:),
      +                               c_in(:,:,:), c_out(:,:,:)
 !$acc declare create (x_in,x_out,x_out2)
 !$acc declare create (y_in,y_out,y_out2,c_in,c_out)
@@ -162,12 +162,6 @@
     
           ! ---- deallocate vars
     
-! if I leave in the 'exit data delete' directives, I get the 
-! correct answers but also get this in the log:
-!
-! Failing in Thread:1
-! call to cuMemFree returned error 1: Invalid value
-
 !$acc exit data delete(xk_d,yk_d)
            deallocate(xk_d, yk_d)
 
@@ -238,18 +232,12 @@
       ! ---- perform tests
 
 
-      write(*,*) 'Calling test_xderiv'
       jj = iys   ! index for printout
       call test_xderiv(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
-      write(*,*) 'Calling test_yderiv'
       jj = jxs   ! index for printout
       call test_yderiv(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
-      write(*,*) 'Calling test_fft2d'
       jj = iys   ! index for printout
       call test_fft2d(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
 
       ! ---- clean up
 
@@ -366,7 +354,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -407,17 +395,17 @@
          end do
 !$acc update device(ax)
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
-!$acc update host(ax)
          if(PrintTestSignal) then
          if (k == izs) then
-            write(nprt,*)
-            write(nprt,*) 'xderiv:'
+           write(nprt,*)
+           write(nprt,*) 'xderiv:'
 
-            do i = 1,nnx
-               write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
-            enddo
- 100        format(' x = ',f,' , a = ',f,' , ax = ',f)
-            call flush(nprt)
+!$acc update host(ax)
+           do i = 1,nnx
+              write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
+           enddo
+ 100       format(' x = ',f,' , a = ',f,' , ax = ',f)
+           call flush(nprt)
          endif
          endif
       end do
@@ -439,7 +427,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +        MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write (*,*) 'test_xderiv: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -486,9 +474,9 @@
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
       ! ---- for printout
-!$acc data copy(at,ayt)
+!$acc data copyout(at,ayt)
 
-      call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
+      call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
@@ -530,7 +518,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if(jj>=ixs .and. jj<=ixe) then
+      if(myid.eq.0) then
         write(*,*) 'test_yderiv: (sec) ',gdt/real(niter)
         call flush(6)
       endif
@@ -1000,7 +988,7 @@
 
       ! ---- backward fft
 
-!$acc host_data use_device(x_out)
+!$acc host_data use_device(x_out2)
       ierr = cufftExecZ2D(pln_xb, x_out2, x_out2)
 !$acc end host_data
 
@@ -1208,13 +1196,13 @@
       iss = is_s(myid)
       ise = is_e(myid)
 
-!     write(6,123)myid,izs,ize,iys,iye,iss,ise
-!123  format('myid = ',i6,' izs,ize = ',2i6,
-!    +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
+      write(nprt,123)myid,izs,ize,iys,iye,iss,ise
+ 123  format('myid = ',i6,' izs,ize = ',2i6,
+     +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
 
-!     write(6,124)myid,ixs,ixe,jxs,jxe
-!124  format('myid = ',i6,' ixs,ixe = ',2i6,
-!    +       ' jxs,jxe = ',2i6)
+      write(nprt,124)myid,ixs,ixe,jxs,jxe
+ 124  format('myid = ',i6,' ixs,ixe = ',2i6,
+     +       ' jxs,jxe = ',2i6)
 
       return
       end
