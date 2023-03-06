@@ -1,0 +1,12 @@
+#!/bin/bash -l
+### Job Name
+#PBS -N test_fftw
+#PBS -A NMMM0008
+#PBS -l select=2:ncpus=4:mpiprocs=4:ngpus=4
+#PBS -l gpu_type=v100
+#PBS -l walltime=01:00
+#PBS -q casper
+#PBS -o /glade/u/home/patton/logs/
+#PBS -j oe
+
+mpirun -n 8 ./a.out > test_fftw.out
