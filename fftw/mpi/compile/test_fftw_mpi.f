@@ -1,5 +1,5 @@
 ! ======================================================================
-!   code to test xderiv, yderiv, and 2d FFT's using cuFFT -- with mpi
+!   code to test xderiv, yderiv, and 2d FFT's using FFTW with mpi
 ! ======================================================================
 !   different from the LES code, this code is currently configured to 
 !   transform horizontal slabs of data at once.  did this to retain 
@@ -8,20 +8,16 @@
 !   izs:ize dimension on x_in/x_out (and equivalent) and increasing 
 !   batch to match.
 ! ======================================================================
-      module timing
-          integer, parameter :: niter=10
-          logical, parameter :: PrintTestSignal=.true.
-      end module timing
 
       module pars
 
-         integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
+         integer, parameter :: i_fft = 1
 
-         integer, parameter :: nnx = 768
-         integer, parameter :: nny = 768
-         integer, parameter :: nnz = 768
+         integer, parameter :: nnx = 32
+         integer, parameter :: nny = 32
+         integer, parameter :: nnz = 32
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s = 2
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -58,124 +54,48 @@
 
 ! ======================================================================
 
-      module cufft_wrk
-
-        ! ---- setup plans and arrays for using cuFFT
-        !      to use legacy fortran calls
-
-        use cufft
-
-        integer :: pln_xf, pln_xb, 
-     +             pln_yf, pln_yb, 
-     +             pln_cf, pln_cb
-
-        integer :: nx_c, ny_c
-
-        real, allocatable :: xk_d(:), yk_d(:)
-!$acc declare create (xk_d,yk_d)
-
-        real, allocatable :: x_in(:,:), x_out(:,:), x_out2(:,:),
-     +                       y_in(:,:), y_out(:,:), y_out2(:,:),
-     +                               c_in(:,:,:), c_out(:,:,:)
-!$acc declare create (x_in,x_out,x_out2)
-!$acc declare create (y_in,y_out,y_out2,c_in,c_out)
-
+      module fftw_wrk
+c
+c ---------- setup plans and arrays for using FFTW
+c            use legacy fortran calls
+c
+        include 'fftw3.f'
+        integer*8 pln_xf, pln_xb, pln_yf, pln_yb, pln_cf, pln_cb
+        integer   nx_w, ny_w
+        real, allocatable :: x_in(:), x_out(:), y_in(:), y_out(:),
+     +                       c_in(:,:), c_out(:,:)
         contains
-
-          subroutine cufft_config(xk,yk)
-
-          use pars, only : iys,iye,ixs,ixe,jxs,jxe
-         
-          real, intent(in) :: xk(nx_c), yk(ny_c)
-          integer :: jj, batch
-
-          ! ---- allocate and copy wavenumbers to device
-
-          allocate(xk_d(nx_c), yk_d(ny_c))
-
-          do i = 1,nx_c
-             xk_d(i) = xk(i)
-          enddo
-          do j = 1,ny_c
-             yk_d(j) = yk(j)
-          enddo
-!$acc update device(xk_d,yk_d)
-
-          ! ---- build plans 
-          !
-          !  https://docs.nvidia.com/cuda/pdf/CUFFT_Library.pdf (pp 7-8)
-          !
-          !  for out-of-place R2C or C2R transforms, input 
-          !  and output sizes match the logical size N and 
-          !  the non-redundant size N/2+1, respectively.
-          !
-          !  for in-place R2C and C2R transforms, the input
-          !  size must be padded to N/2+1 complex elements.
-
-          allocate( x_in(nx_c,  iys:iye)) 
-          allocate(x_out(nx_c+2,iys:iye))
-          allocate(x_out2(nx_c+2,iys:iye))
-
-          allocate( y_in(ny_c,  ixs:ixe))
-          allocate(y_out(ny_c+2,ixs:ixe))
-          allocate(y_out2(ny_c+2,ixs:ixe))
-
-          jj = (jxe-jxs+1)/2
-          allocate(c_in(2,ny_c,jj), c_out(2,ny_c,jj))
-
-          ! ---- plans for x
-
-          batch = iye-iys+1       ! --- number of 1D ffts to execute
-
-          ierr = cufftPlan1D(pln_xf,nx_c,CUFFT_D2Z,batch)  ! R2C => single prec, D2Z => double
-          ierr = cufftPlan1D(pln_xb,nx_c,CUFFT_Z2D,batch)  ! C2R => single prec, Z2D => double
-
-          ! ---- plans for y
-
-          batch = ixe-ixs+1       ! --- number of 1D ffts to execute
-
-          ierr = cufftPlan1D(pln_yf,ny_c,CUFFT_D2Z,batch)
-          ierr = cufftPlan1D(pln_yb,ny_c,CUFFT_Z2D,batch)
-
-          ! ---- plans for complex in y
-
-          batch = (jxe-jxs+1)/2   ! --- number of 1D ffts to execute
-
-          ierr = cufftPlan1D(pln_cf,ny_c,CUFFT_Z2Z,batch)
-          ierr = cufftPlan1D(pln_cb,ny_c,CUFFT_Z2Z,batch)
-
+          subroutine plans
+c
+c --------- build plans given array size
+c
+          allocate(x_in(nx_w+2), x_out(nx_w+2))
+          allocate(y_in(ny_w+2), y_out(ny_w+2))
+          allocate(c_in(2,ny_w), c_out(2,ny_w))
+c
+c --------- plans for x
+c
+          call dfftw_plan_dft_r2c_1d
+     +         (pln_xf,nx_w,x_in,x_out,FFTW_MEASURE)
+          call dfftw_plan_dft_c2r_1d
+     +         (pln_xb,nx_w,x_out,x_out,FFTW_MEASURE)
+c
+c --------- plans for y
+c
+          call dfftw_plan_dft_r2c_1d
+     +         (pln_yf,ny_w,y_in,y_out,FFTW_MEASURE)
+          call dfftw_plan_dft_c2r_1d
+     +         (pln_yb,ny_w,y_out,y_out,FFTW_MEASURE)
+c
+c --------- plans for complex in y
+c
+          call dfftw_plan_dft_1d
+     +         (pln_cf,ny_w,c_in,c_out,FFTW_FORWARD,FFTW_MEASURE)
+          call dfftw_plan_dft_1d
+     +         (pln_cb,ny_w,c_in,c_out,FFTW_BACKWARD,FFTW_MEASURE)
           return
-          end subroutine cufft_config
-
-          subroutine cufft_finalize
-
-          ! ---- destroy the plans
-
-          ierr = cufftDestroy(pln_xf)
-          ierr = cufftDestroy(pln_xb)
-          ierr = cufftDestroy(pln_yf)
-          ierr = cufftDestroy(pln_yb)
-          ierr = cufftDestroy(pln_cf)
-          ierr = cufftDestroy(pln_cb)
-    
-          ! ---- deallocate vars
-    
-!$acc exit data delete(xk_d,yk_d)
-           deallocate(xk_d, yk_d)
-
-!$acc exit data delete(x_in,x_out,x_out2)
-           deallocate(x_in, x_out,x_out2)
-
-!$acc exit data delete(y_in,y_out,y_out2)
-           deallocate(y_in, y_out,y_out2)
-
-!$acc exit data delete(c_in,c_out)
-           deallocate(c_in, c_out)
-    
-          return
-          end subroutine cufft_finalize
-
-      end module cufft_wrk
+          end subroutine plans
+      end module fftw_wrk
 
 ! ======================================================================
 
@@ -185,12 +105,11 @@
 
 ! ======================================================================
 
-      program test_cufft
+      program test_fftw
 
       use pars
       use fields
-      use cufft
-      use cufft_wrk
+      use fftw_wrk
       use fftwk
       include 'mpif.h'
 
@@ -213,34 +132,30 @@
       allocate( ax(nnx,iys:iye) )
       allocate( ay(nnx,iys:iye,izs:ize) )
 
-!$acc enter data create(a,b,ax,ay)
-
       ! ---- initialize the ffts
 
       nq_trig = max(nnx,nny)
       allocate(trigx(2*nq_trig+15,2),
      +         trigc(4*nq_trig+15))
 
-      if (i_fft == 2) then  ! setup cufft plans
-         nx_c = nnx
-         ny_c = nny
-         call cufft_config(xk,yk)
+      if (i_fft == 1) then  ! setup fftw plans
+         nx_w = nnx
+         ny_w = nny
+         call plans
       endif
 
       ! ---- perform tests
 
       jj = iys   ! index for printout
       call test_xderiv(jj)
+
       jj = jxs   ! index for printout
       call test_yderiv(jj)
+
       jj = iys   ! index for printout
       call test_fft2d(jj)
 
       ! ---- clean up
-
-      call cufft_finalize
-    
-!$acc exit data delete(a,b,ax,ay)
 
       deallocate(a)
       deallocate(b)
@@ -251,7 +166,8 @@
 
       call mpi_finalize(ierr)
 
-      end program test_cufft
+      stop
+      end program test_fftw
 
 ! ======================================================================
 
@@ -261,16 +177,12 @@
 
       use pars
       use fields
-      use cufft
-      use cufft_wrk
+      use fftw_wrk
       use fftwk
-      use timing
-      include 'mpif.h'
 
       integer, intent(in) :: jj
 
       real, dimension(nnx) :: ai
-      double precision :: et,st,ldt,gdt
 
       ! ---- initialize array on host
 
@@ -292,8 +204,6 @@
          enddo
       endif
 
-!$acc update device(a)
-
       ! ---- forward transform
 
       call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
@@ -308,9 +218,6 @@
 
       ! ---- check ouput array
 
-!$acc update host(a)
-
-      if(PrintTestSignal) then 
       if (jj >= iys .and. jj <= iye) then
          write(nprt,*)
          write(nprt,*) 'fft2d:'
@@ -319,35 +226,6 @@
             write(nprt,100) dble(i-1)*dx, ai(i), a(i,jj,izs)
          enddo
  100     format(' x = ',f,' , send = ',f,' , recv = ',f)
-         call flush(nprt)
-      endif
-      endif
-
-      do concurrent (k=izs:ize,j=iys:iye,i=1:nnx)
-         a(i,j,k) = sin(dble(i-1)*dx)
-      end do
-
-      st = MPI_Wtime()
-      do it=1,niter
-         ! ---- forward transform
-
-         call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
-     +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,-2)
-
-         ! ---- backward transform
-
-         call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
-     +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,2)
-      enddo
-      et = MPI_Wtime()
-      ldt = et-st
-      call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
-     +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (myid.eq.0) then
-         write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
-         call flush(6)
       endif
 
       return
@@ -361,13 +239,8 @@
 
       use pars
       use fields
-      use cufft
-      use cufft_wrk
+      use fftw_wrk
       use fftwk
-      use timing
-      include 'mpif.h'
-      double precision :: st,et,ldt,gdt
-      integer :: ierr
 
       integer, intent(in) :: jj
 
@@ -375,51 +248,24 @@
 
       dx = xl / dble(nnx)
 
-      ! First look at correctness
       do k = izs,ize
-         do j=iys,iye
-         do i=1,nnx
+         do j = iys,iye
+         do i = 1,nnx
             a(i,j,k) = sin(dble(i-1)*dx)
             ax(i,j) = a(i,j,k)
          end do
          end do
-!$acc update device(ax)
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
 
-         if(PrintTestSignal) then 
-         if (k == izs ) then
-           write(nprt,*)
-           write(nprt,*) 'xderiv:'
-
-!$acc update host(ax)
-           do i = 1,nnx
-             write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
-           enddo
- 100       format(' x = ',f,' , a = ',f,' , ax = ',f)
-           call flush(nprt)
-         endif
+         if (k == izs) then
+            write(nprt,*)
+            write(nprt,*) 'xderiv:'
+            do i = 1,nnx
+               write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
+            enddo
+ 100        format(' x = ',f,' , a = ',f,' , ax = ',f)
          endif
       end do
-
-      ! Next evaluate for performance
-      do concurrent (j=iys:iye,i=1:nnx)
-         a(i,j,k) = sin(dble(i-1)*dx)
-         ax(i,j) = a(i,j,k)
-      end do
-      st = MPI_Wtime()
-      do it=1,niter
-        do k = izs,ize
-          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
-        end do
-      end do
-      et = MPI_Wtime()
-      ldt = et-st
-      call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
-     +        MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (myid.eq.0) then
-         write (*,*) 'test_xderiv: (sec) ',gdt/real(niter)
-         call flush(6)
-      endif
 
       return
       end subroutine test_xderiv
@@ -432,80 +278,49 @@
 
       use pars
       use fields
-      use cufft
-      use cufft_wrk
+      use fftw_wrk
       use fftwk
-      use timing
-      include 'mpif.h'
 
-      real ::  at(nny,ixs:ixe,izs:ize)
+      real ::  at(nny,jxs:jxe,izs:ize)
       real :: ayt(nny,ixs:ixe,izs:ize)
 
       integer, intent(in) :: jj
-      double precision :: et,st,ldt,gdt
-      integer :: ierr
 
       dy = yl / dble(nny)
 
-      do k=izs,ize
-      do j=iys,iye
-      do i=1,nnx
-          a(i,j,k) = sin(dble(j-1)*dy)
-         ay(i,j,k) = a(i,j,k)
+      do k = izs,ize
+         do j = iys,iye
+         do i = 1,nnx
+             a(i,j,k) = sin(dble(j-1)*dy)
+            ay(i,j,k) = a(i,j,k)
+         end do
+         end do
       enddo
-      enddo
-      enddo
-
-!$acc update device(a,ay)
-
       call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
      +           nnx,nny,ixs,ixe,ix_s,ix_e,
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
       ! ---- for printout
-!$acc data copyout(at,ayt)
 
       call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
-!$acc end data
 
-      if(PrintTestSignal) then 
-      do i=1,nnx
-         if (i==jj) then
+      do i = 1,nnx
+         if (i == jj) then
             write(nprt,*)
             write(nprt,*) 'yderiv:'
 
             do j = 1,nny
-              write(nprt,100) dble(j-1)*dy,at(j,i,1),ayt(j,i,1)
+               write(nprt,100) dble(j-1)*dy,at(j,i,izs),ayt(j,i,izs)
             enddo
  100        format(' y = ',f,' , a = ',f,' , ay = ',f)
             call flush(nprt)
+            exit
          endif
       enddo
-      endif
-      ! next measure performance
-      ! Initialize on the GPU 
-      do concurrent(k=izs:ize,j=iys:iye,i=1:nnx)
-          a(i,j,k) = sin(dble(j-1)*dy)
-         ay(i,j,k) = a(i,j,k)
-      enddo
 
-      st = MPI_Wtime()
-      do it=1,niter
-         call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
-     +           nnx,nny,ixs,ixe,ix_s,ix_e,
-     +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
-      enddo
-      et = MPI_Wtime()
-      ldt = et-st
-      call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION, 
-     +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if(myid.eq.0) then 
-        write(*,*) 'test_yderiv: (sec) ',gdt/real(niter)
-        call flush(6)
-      endif
 
       return
       end subroutine test_yderiv
@@ -520,8 +335,8 @@
 
       use pars, only : i_fft
 
-      if (i_fft == 2) then
-         call fft2d_cuda(ax,at,nx,ny,
+      if (i_fft == 1) then
+         call fft2d_mpi_fftw(ax,at,nx,ny,
      +           jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
      +           iz1,iz2,myid,ncpu,np,isgn)
       endif
@@ -531,141 +346,121 @@
 
 ! ======================================================================
 
-      subroutine fft2d_cuda(ax,at,nx,ny,
+      subroutine fft2d_mpi_fftw(ax,at,nx,ny,
      +           jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
      +           iz1,iz2,myid,ncpu,np,isgn)
-
-      ! ---- get 2d fft using cuFFT routines
-      !
-      !     isgn = -1 do forward transform, get coefficients
-      !               incoming array is ax(nx+2,iys:iye,iz1:iz2)
-      !               outgoing array is ax(nx+2,iys:iye,iz1:iz2)
-      !
-      !     isgn = -2 do forward transform, get coefficients
-      !               incoming array is ax(nx+2,iys:iye,iz1:iz2)
-      !               outgoing array is at(ny,jxs:jxe,iz1:iz2)
-      !
-      !     isgn =  1 do inverse transform, move to physical space
-      !               incoming array is ax(nx+2,iys:iye,iz1:iz2)
-      !               outgoing array is ax(nx+2,iys:iye,iz1:iz2)
-      !
-      !     isgn =  2 do inverse transform, move to physical space
-      !               incoming array is at(ny,jxs:jxe,iz1:iz2)
-      !               outgoing array is ax(nx+2,iys:iye,iz1:iz2)
-
-      use cufft
-      use cufft_wrk
-
-      real :: ax(nx+2,iys:iye,iz1:iz2), at(ny,jxs:jxe,iz1:iz2)
-
-      integer, dimension(0:np-1) :: jx_s,jx_e,iy_s,iy_e
-      integer :: ij,ij2
-
+c
+c -------- get 2d fft using fftw routines and parallel mpi
+c
+c         isgn = -1 do forward transform, get coefficients
+c                   incoming array is ax(nx+2,iys:iye,iz1:iz2)
+c                   outgoing array is ax(nx+2,iys:iye,iz1:iz2)
+c
+c         isgn = -2 do forward transform, get coefficients
+c                   incoming array is ax(nx+2,iys:iye,iz1:iz2)
+c                   outgoing array is at(ny,jxs:jxe,iz1:iz2)
+c
+c         isgn =  1 do inverse transform, move to physical space
+c                   incoming array is ax(nx+2,iys:iye,iz1:iz2)
+c                   outgoing array is ax(nx+2,iys:iye,iz1:iz2)
+c
+c         isgn =  2 do inverse transform, move to physical space
+c                   incoming array is at(ny,jxs:jxe,iz1:iz2)
+c                   outgoing array is ax(nx+2,iys:iye,iz1:iz2)
+c
+      use fftw_wrk
+c
+      real ax(nx+2,iys:iye,iz1:iz2), at(ny,jxs:jxe,iz1:iz2)
+      integer jx_s(0:np-1), jx_e(0:np-1),
+     +        iy_s(0:np-1), iy_e(0:np-1)
+c
       nxp2 = nx + 2
-
-      if (isgn < 0) then
-
-         fn = 1./dble(nx*ny)
-
-         ! ---- 1d fft in x over [iys,iye] for all z
-
-         do k = iz1,iz2
-            do concurrent (j=iys:iye,i=1:nx)
-               x_in(i,j) = ax(i,j,k)*fn                ! note: currently shifting one x-y slab to device
-            enddo
-
-!$acc host_data use_device(x_in,x_out)
-            ierr = cufftExecD2Z(pln_xf,x_in,x_out)        ! perform forward R2C 1D ffts in x-direction for [iys,iye]
-!$acc end host_data
-
-            do concurrent (j=iys:iye,i=1:nxp2)
-               ax(i,j,k) = x_out(i,j)                  ! note: shifting data back to host 
+      if(isgn .lt. 0) then
+         fn   = 1.0/(float(nx)*float(ny))
+c
+c ------ 1d fft in x over [iys,iye] for all z
+c
+         do iz=iz1,iz2
+            do j=iys,iye
+               do i=1,nx
+                  x_in(i)  = ax(i,j,iz)*fn
+               enddo
+               call dfftw_execute_dft_r2c(pln_xf, x_in, x_out)
+               do i=1,nxp2
+                  ax(i,j,iz) = x_out(i)
+               enddo
             enddo
          enddo
-
          call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +        iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-
-         ! ---- 1d fft in y over [jxs,jxe] for all z
-
-         do k = iz1,iz2
-            do concurrent (i=jxs:jxe:2,j=1:ny)
-               ij = ((i-jxs)/2)+1
-               c_in(1,j,ij) = at(j,i,k)                 ! note: shifting data to device here
-               c_in(2,j,ij) = at(j,i+1,k)
-            enddo
-
-!$acc host_data use_device(c_in,c_out)
-            ierr = cufftExecZ2Z(pln_cf, c_in, c_out, CUFFT_FORWARD) ! perform forward C2C 1D ffts in y for [jxs,jxe]/2
-!$acc end host_data
-
-            do concurrent (i=jxs:jxe:2,j=1:ny)
-               ij = ((i-jxs)/2)+1
-               at(j,i,k)   = c_out(1,j,ij)              ! note: shifting data back to host here
-               at(j,i+1,k) = c_out(2,j,ij)
+c
+c ------ 1d fft in y over [jxs,jxe] for all z
+c
+         do iz=iz1,iz2
+            do ix=jxs,jxe,2
+               do iy=1,ny
+                  c_in(1,iy) = at(iy,ix,iz)
+                  c_in(2,iy) = at(iy,ix+1,iz)
+               enddo
+               call dfftw_execute_dft(pln_cf, c_in, c_out)
+               do iy=1,ny
+                  at(iy,ix,iz)   = c_out(1,iy)
+                  at(iy,ix+1,iz) = c_out(2,iy)
+               enddo
             enddo
          enddo
-
-         ! ---- decide whether to transpose back or leave as is
-
-         if (isgn == -1) then
+c
+c ---- decide whether to transpose back or leave as is
+c
+         if(isgn .eq. -1) then
             call ytox_trans(at,ax,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
          endif
-
+c
       else
-
-         ! ---- decide whether to first transpose or leave as is
-
-         if (isgn == 1) then
+c
+c ---- decide whether to first transpose or leave as is
+c
+         if(isgn .eq. 1) then
             call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
          endif
-
-         ! ---- 1d fft in y over [jxs,jxe] for all z
-
-         do k = iz1,iz2
-            do concurrent (i=jxs:jxe:2,j=1:ny)
-               ij = ((i-jxs)/2)+1
-               c_in(1,j,ij) = at(j,i,k)
-               c_in(2,j,ij) = at(j,i+1,k)
-            enddo
-
-!$acc host_data use_device(c_in,c_out)
-            ierr = cufftExecZ2Z(pln_cb, c_in, c_out, CUFFT_INVERSE)
-!$acc end host_data
-
-            do concurrent (i=jxs:jxe:2,j=1:ny)
-               ! ij = floor(real(i-jxs)/2.0)+1
-               ij = ((i-jxs)/2)+1
-               at(j,i,k)   = c_out(1,j,ij)
-               at(j,i+1,k) = c_out(2,j,ij)
+c
+c ------ 1d fft in y over [jxs,jxe] for all z
+c
+         do iz=iz1,iz2
+            do ix=jxs,jxe,2
+               do iy=1,ny
+                  c_in(1,iy) = at(iy,ix,iz)
+                  c_in(2,iy) = at(iy,ix+1,iz)
+               enddo
+               call dfftw_execute_dft(pln_cb, c_in, c_out)
+               do iy=1,ny
+                  at(iy,ix,iz)   = c_out(1,iy)
+                  at(iy,ix+1,iz) = c_out(2,iy)
+               enddo
             enddo
          enddo
-
          call ytox_trans(at,ax,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +        iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-
-         ! ----  1d fft in x over [iys,iye] for all z
-
-         do k = iz1,iz2
-            do concurrent (j=iys:iye,i=1:nxp2)
-               x_out(i,j) = ax(i,j,k)               ! note: shifting data to device
-            enddo
-
-!$acc host_data use_device(x_out)
-            ierr = cufftExecZ2D(pln_xb, x_out, x_out)  ! perform backward 1D C2R ffts in x-direction for entire yz-tube
-!$acc end host_data
-
-            do concurrent (j=iys:iye,i=1:nx)
-               ax(i,j,k) = x_out(i,j)               ! note: shifting data back to host
+c
+c ------  1d fft in x over [iys,iye] for all z
+c
+         do iz=iz1,iz2
+            do iy=iys,iye
+               do ix=1,nxp2
+                  x_out(ix) = ax(ix,iy,iz)
+               enddo
+               call dfftw_execute_dft_c2r(pln_xb, x_out, x_out)
+               do ix=1,nx
+                  ax(ix,iy,iz) = x_out(ix)
+               enddo
             enddo
          enddo
-
       endif
-
+c
       return
-      end subroutine fft2d_cuda
+      end
 
 ! ====================================================================
 
@@ -687,14 +482,13 @@
 
       integer, intent(in), dimension(0:np-1) :: ix_s,ix_e,iy_s,iy_e
 
-!$acc data create(ft,gt)
-
       jk = (iye - iys + 1)*(iz2 - iz1 + 1)
       ik = (ixe - ixs + 1)*(iz2 - iz1 + 1)
  
       ! ---- loop over cpus on a slab for given myid
  
       iss = (myid/ncpu_s)*ncpu_s
+ 
       do i = 1,ncpu_s
          is    = mod(myid - iss + i,ncpu_s) + iss
          ir    = mod(myid - iss + (ncpu_s - i),ncpu_s) + iss
@@ -707,21 +501,17 @@
             call send_xtoy(f,ft(1),nx,ix_s(is),ix_e(is),
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
 
-!$acc host_data use_device(ft,gt)
             call mpi_irecv(gt(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
             call mpi_isend(ft(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
-!$acc end host_data
-
             call mpi_wait(ireqs,istatus,ierr)
             call mpi_wait(ireqr,istatus,ierr)
          endif
          call recv_xtoy(g,gt(1),ny,ix_s(myid),ix_e(myid),
      +                  iy_s(ir),iy_e(ir),iz1,iz2)
       enddo
-!$acc end data
-
+ 
       return
       end
 
@@ -745,7 +535,6 @@
  
       integer, intent(in), dimension(0:np-1) :: ix_s,ix_e,iy_s,iy_e
  
-!$acc data create(ft,gt)
       jk = (iye - iys + 1)*(iz2 - iz1 + 1)
       ik = (ixe - ixs + 1)*(iz2 - iz1 + 1)
  
@@ -763,14 +552,11 @@
          else
             call send_ytox(g,gt(1),ny,ix_s(myid),ix_e(myid),
      +                  iy_s(is),iy_e(is),iz1,iz2)
-
-!$acc host_data use_device(ft,gt)
+ 
             call mpi_irecv(ft(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
             call mpi_isend(gt(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
-!$acc end host_data
-
             call mpi_wait(ireqs,istatus,ierr)
             call mpi_wait(ireqr,istatus,ierr)
  
@@ -778,7 +564,6 @@
          call recv_ytox(f,ft(1),nx,ix_s(ir),ix_e(ir),
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
       enddo
-!$acc end data
  
       return
       end
@@ -791,10 +576,14 @@
  
       real f(nx,iys:iye,izs:ize), ft(ixs:ixe,iys:iye,izs:ize)
  
-      do concurrent (k=izs:ize,j=iys:iye,i=ixs:ixe)
-         ft(i,j,k) = f(i,j,k)
+      do k = izs,ize
+         do j = iys,iye
+         do i = ixs,ixe
+            ft(i,j,k) = f(i,j,k)
+         enddo
+         enddo
       enddo
-
+ 
       return
       end
 
@@ -803,8 +592,12 @@
       subroutine recv_xtoy(g,gt,ny,ixs,ixe,iys,iye,izs,ize)
       real g(ny,ixs:ixe,izs:ize), gt(ixs:ixe,iys:iye,izs:ize)
  
-      do concurrent (k=izs:ize,j=iys:iye,i=ixs:ixe)
-         g(j,i,k) = gt(i,j,k)
+      do k = izs,ize
+         do j = iys,iye
+         do i = ixs,ixe
+            g(j,i,k) = gt(i,j,k)
+         enddo
+         enddo
       enddo
 
       return
@@ -818,8 +611,12 @@
  
       real g(ny,ixs:ixe,izs:ize), gt(iys:iye,ixs:ixe,izs:ize)
  
-      do concurrent (k=izs:ize,i=ixs:ixe,j=iys:iye)
-         gt(j,i,k) = g(j,i,k)
+      do k = izs,ize
+         do i = ixs,ixe
+         do j = iys,iye
+            gt(j,i,k) = g(j,i,k)
+         enddo
+         enddo
       enddo
  
       return
@@ -830,8 +627,12 @@
       subroutine recv_ytox(f,ft,nx,ixs,ixe,iys,iye,izs,ize)
       real f(nx,iys:iye,izs:ize), ft(iys:iye,ixs:ixe,izs:ize)
  
-      do concurrent (k=izs:ize,i=ixs:ixe,j=iys:iye)
-         f(i,j,k) = ft(j,i,k)
+      do k = izs,ize
+         do i = ixs,ixe
+         do j = iys,iye
+            f(i,j,k) = ft(j,i,k)
+         enddo
+         enddo
       enddo
 
       return
@@ -874,8 +675,8 @@
 
       use pars, only : i_fft
 
-      if (i_fft == 2) then
-         call xd_cuda(ax,nnx,iys,iye)
+      if(i_fft == 1) then
+         call xd_fftw(ax,xk,nnx,iys,iye)
       endif
 
       return
@@ -883,62 +684,39 @@
 
 ! ======================================================================
 
-      subroutine xd_cuda(ax,nx,iys,iye)
-
-      ! ----- get multiple x derivatives using cuda routines
-
-      use cufft
-      use cufft_wrk
-
-      integer, intent(in) :: nx,iys,iye
-      real, intent(inout), dimension(nx,iys:iye) :: ax
-
-      integer :: ii2
-
-      ! ---- move input array to device
-
-!     fn = 1.0/dble(nx)
-      fn = 1.0
-      do concurrent (j=iys:iye,i=1:nx)
-         x_in(i,j) = ax(i,j)*fn
+      subroutine xd_fftw(ax,xk,nnx,iys,iye)
+c
+c -------- get multiple x derivatives using fftw routines
+c
+      use fftw_wrk
+      real xk(nnx), ax(nnx,iys:iye)
+c
+c     fn = 1.0/float(nnx)
+      do iy=iys,iye
+         do i=1,nnx
+            x_in(i) = ax(i,iy)
+         enddo
+         call dfftw_execute_dft_r2c(pln_xf, x_in, x_out)
+         ii           = 1
+         x_out(1)     = 0.0
+         x_out(2)     = 0.0
+         do i=3,nnx-1,2
+            ii         = ii + 1
+            temp       = x_out(i)
+            x_out(i)   = -xk(ii)*x_out(i+1)
+            x_out(i+1) = xk(ii)*temp
+         enddo
+         x_out(nnx+1) = 0.0
+         x_out(nnx+2) = 0.0
+         call dfftw_execute_dft_c2r(pln_xb, x_out, x_out)
+         do i=1,nnx
+            ax(i,iy) = x_out(i)
+         enddo
       enddo
-
-      ! ---- forward 1D fft in x for all [iys,iye]
-
-!$acc host_data use_device(x_in,x_out)
-      ierr = cufftExecD2Z(pln_xf, x_in, x_out)
-!$acc end host_data
-
-      ! ---- spectral derivative
-
-      do concurrent (j=iys:iye)
-         x_out2(1,j)   = 0.0
-         x_out2(2,j)   = 0.0
-      enddo
-      do concurrent (j=iys:iye,i=3:nx-1:2)
-         ii = ((i-3)/2)+2
-         x_out2(i,j)   = -xk_d(ii)*x_out(i+1,j)
-         x_out2(i+1,j) = xk_d(ii)*x_out(i,j)
-      enddo
-      do concurrent (j=iys:iye)
-         x_out2(nx+1,j) = 0.0
-         x_out2(nx+2,j) = 0.0
-      enddo
-
-      ! ---- backward fft
-
-!$acc host_data use_device(x_out2)
-      ierr = cufftExecZ2D(pln_xb, x_out2, x_out2)
-!$acc end host_data
-
-      ! ---- copy data back to host
-
-      do concurrent (j=iys:iye,i=1:nx)
-         ax(i,j) = x_out2(i,j)
-      enddo
-
+c
       return
-      end subroutine xd_cuda
+      end
+
 
 ! ======================================================================
 
@@ -950,9 +728,9 @@
 
       use pars, only : i_fft
 
-      if (i_fft == 2) then
-         call yd_cuda(ay,yk,nx,ny,ixs,ixe,ix_s,ix_e,
-     +                iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
+      if(i_fft == 1) then
+         call yd_mpi_fftw(ay,yk,nx,ny,ixs,ixe,ix_s,ix_e,
+     +                    iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
       endif
 
       return
@@ -960,85 +738,51 @@
 
 ! ======================================================================
 
-      subroutine yd_cuda(ay,yk,
-     +                   nx,ny,ixs,ixe,ix_s,ix_e,
-     +                   iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-
-      ! ---- get multiple y derivatives using cuda routines
-
-      use cufft
-      use cufft_wrk
-
-      integer, intent(in) :: nx,ny,ixs,ixe,iys,iye,iz1,iz2,myid,ncpu,np
-      integer, intent(in), dimension(0:np-1) :: ix_s, ix_e, iy_s, iy_e
-
-      real, intent(in), dimension(ny) :: yk
-      real, intent(inout), dimension(nx,iys:iye,iz1:iz2) :: ay
-
-      real :: ayt(ny,ixs:ixe,iz1:iz2)
-
-      ! ---- transpose so all y resides locally on each task
-
-!$acc data create(ayt)
+      subroutine yd_mpi_fftw(ay,yk,
+     +           nx,ny,ixs,ixe,ix_s,ix_e,
+     +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
+c
+c -------- get multiple y derivatives using fftw routines
+c
+      use fftw_wrk
+      real yk(ny), ay(nx,iys:iye,iz1:iz2)
+      real ayt(ny,ixs:ixe,iz1:iz2)
+c
+      integer ix_s(0:np-1), ix_e(0:np-1),
+     +        iy_s(0:np-1), iy_e(0:np-1)
+c
       call xtoy_trans(ay,ayt,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-
-      ! ---- loop over z
-
-      do k = iz1,iz2
-
-         ! ---- copy y-x slab to device
-
-         fn = 1.0
-         do concurrent (i=ixs:ixe,j=1:ny)
-            y_in(j,i) = ayt(j,i,k)*fn
+c
+c     fn = 1.0/float(nny)
+      do iz=iz1,iz2
+         do ix=ixs,ixe
+            do j=1,ny
+               y_in(j) = ayt(j,ix,iz)
+            enddo
+            call dfftw_execute_dft_r2c(pln_yf, y_in, y_out)
+            ii       = 1
+            y_out(1) = 0.0
+            y_out(2) = 0.0
+            do j=3,ny-1,2
+               ii         = ii + 1
+               temp       = y_out(j)
+               y_out(j)   = -yk(ii)*y_out(j+1)
+               y_out(j+1) = yk(ii)*temp
+            enddo
+            y_out(ny+1) = 0.0
+            y_out(ny+2) = 0.0
+            call dfftw_execute_dft_r2c(pln_yb, y_out, y_out)
+            do j=1,ny
+               ayt(j,ix,iz) = y_out(j)
+            enddo
          enddo
-
-         ! ---- forward 1D fft in y for all [ixs:ixe]
-
-!$acc host_data use_device(y_in,y_out)
-         ierr = cufftExecD2Z(pln_yf, y_in, y_out)
-!$acc end host_data
-
-         ! ---- spectral derivative
-
-         do concurrent (i=ixs:ixe)
-            y_out2(1,i) = 0.0
-            y_out2(2,i) = 0.0
-         enddo
-         do concurrent (i=ixs:ixe,j=3:ny-1:2)
-            ii           = ((j-3)/2)+2
-            y_out2(j,i)   = -yk_d(ii)*y_out(j+1,i)
-            y_out2(j+1,i) = yk_d(ii)*y_out(j,i)
-         enddo
-         do concurrent (i=ixs:ixe)
-            y_out2(ny+1,i) = 0.0
-            y_out2(ny+2,i) = 0.0
-         enddo
-
-         ! ---- backward fft
-
-!$acc host_data use_device(y_out2)
-         ierr = cufftExecZ2D(pln_yb, y_out2, y_out2)
-!$acc end host_data
-
-         ! ---- copy data back to host
-
-         do concurrent (i=ixs:ixe,j=1:ny)
-            ayt(j,i,k) = y_out2(j,i)
-         enddo
-
       enddo
-
-
-      ! ---- transpose back so all x resides locally on each task
-
       call ytox_trans(ayt,ay,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-!$acc end data
-
+c
       return
-      end subroutine yd_cuda
+      end
 
 ! ===============================================================================
 
@@ -1118,17 +862,14 @@
       mxe = mx_e(myid)
       izs = iz_s(myid)
       ize = iz_e(myid)
-      iss = is_s(myid)
-      ise = is_e(myid)
 
+!     write(*,123)myid,izs,ize,iys,iye,iss,ise
+!123  format('myid = ',i6,' izs,ize = ',2i6,
+!    +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
 
-      write(nprt,123)myid,izs,ize,iys,iye,iss,ise
- 123  format('myid = ',i6,' izs,ize = ',2i6,
-     +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
-
-      write(nprt,124)myid,ixs,ixe,jxs,jxe
- 124  format('myid = ',i6,' ixs,ixe = ',2i6,
-     +       ' jxs,jxe = ',2i6)
+!     write(*,124)myid,ixs,ixe,jxs,jxe
+!124  format('myid = ',i6,' ixs,ixe = ',2i6,
+!    +       ' jxs,jxe = ',2i6)
 
       return
       end
@@ -1147,6 +888,7 @@
  
       return
       end
+
 ! ======================================================================
 
       subroutine init_nprt

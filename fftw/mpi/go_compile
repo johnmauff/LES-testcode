@@ -1,0 +1,15 @@
+#!/bin/ksh
+
+compdir=./compile/
+mkdir -p $compdir
+cwd=`pwd`
+
+cd $compdir
+
+cp $cwd/$1 .
+
+mpif90 $1 -r8 -assume byterecl -O2 \
+       -I${MKLROOT}/include/fftw
+
+mv a.out $cwd/.
+cd $cwd
