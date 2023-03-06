@@ -21,7 +21,7 @@
          integer, parameter :: nny = 32
          integer, parameter :: nnz = 32
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s = 2
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -387,12 +387,6 @@
             ax(i,j) = a(i,j,k)
          end do
          end do
-         ! Initialize on the GPU
-         ! Will generate non B4B answers
-         !do concurrent (j=iys:iye,i=1:nnx)
-         !   a(i,j,k) = sin(dble(i-1)*dx)
-         !   ax(i,j) = a(i,j,k)
-         !end do
 !$acc update device(ax)
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
 !$acc update host(ax)
