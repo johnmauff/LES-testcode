@@ -16,7 +16,7 @@ export PALS_PPN=4
 export PALS_DEPTH=32
 export PALS_CPU_BIND=depth
 
-mpiexec -n 8 -ppn 4 get_local_rank ./a.out >& test_out.log
+mpiexec -n 8 -ppn 4 get_local_rank ./testx >& test_out.768.log
 #nsys profile -o cufft_test --trace openacc,cuda,mpi mpiexec -n 8 ./a.out
 
 

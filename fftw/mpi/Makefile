@@ -1,4 +1,6 @@
 # Makefile
+#
+# defaults
 USE_OPENACC_L = $(shell echo $(USE_OPENACC) | tr A-Z a-z)
 USE_ISO_L     = $(shell echo $(USE_ISO) | tr A-Z a-z)
 USE_MPI_L     = $(shell echo $(USE_MPI) | tr A-Z a-z)
@@ -19,7 +21,15 @@ endif
 ifeq (${FC},ftn)
   OPTS +=  -s real64 -O2 -Ovector2 -Oscalar2 -Othread2 -h acc
 endif
-
+# ------------------------------
+# Intel compiler
+# ------------------------------
+ifeq (${FC},ifort)
+  #  module load oneapi/2023.0.0 
+  #  module load fftw
+  #OPTS += -r8 -assume byterecl -I${NCAR_INC_FFTW}/include/fftw -L${NCAR_LDFLAGS_FFTW}/lib -lfftw3
+  OPTS += -r8 -assume byterecl -lfftw3
+endif
 
 
 ifeq (${USE_MPI_L},true)
@@ -31,7 +41,7 @@ endif
 $(info $$OPTS is [${OPTS}])
 $(info $$FC is [${FC}])
 
-SRC = test_cufft_mpi.f
+SRC = test_fftw_mpi.f
 
 OBJS = $(addsuffix .o, $(basename $(SRC)))
 

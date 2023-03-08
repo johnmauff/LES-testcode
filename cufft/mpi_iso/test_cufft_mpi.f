@@ -17,11 +17,11 @@
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 512
-         integer, parameter :: nny = 512
-         integer, parameter :: nnz = 512
+         integer, parameter :: nnx = 768
+         integer, parameter :: nny = 768
+         integer, parameter :: nnz = 768
 
-         integer, parameter :: ncpu_s = 2
+         integer, parameter :: ncpu_s = 8
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -234,10 +234,11 @@
 
       ! ---- perform tests
 
-      jj = 13
-
+      jj = iys   ! index for printout
       call test_xderiv(jj)
+      jj = jxs   ! index for printout
       call test_yderiv(jj)
+      jj = iys   ! index for printout
       call test_fft2d(jj)
 
       ! ---- clean up
@@ -287,17 +288,12 @@
          end do
          end do
       end do
-      ! Initialize state on the GPU... 
-      ! Will generate non-bit-for-bit answers
-      !do concurrent (k=izs:ize,j=iys:iye,i=1:nnx)
-      !   a(i,j,k) = sin(dble(i-1)*dx)
-      !end do
 
       ! ---- grab desired line from the initial array for printout
 
       if (jj >= iys .and. jj <= iye) then
          do i = 1,nnx
-            ai(i)  = a(i,jj,1)
+            ai(i)  = a(i,jj,izs)
          enddo
       endif
 
@@ -394,13 +390,13 @@
          end do
 !$acc update device(ax)
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
-!$acc update host(ax)
 
          if(PrintTestSignal) then 
          if (k == izs ) then
            write(nprt,*)
            write(nprt,*) 'xderiv:'
 
+!$acc update host(ax)
            do i = 1,nnx
              write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
            enddo
@@ -475,7 +471,7 @@
       if(PrintTestSignal) then 
 !$acc data copyout(at,ayt)
 
-      call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
+      call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
@@ -1127,14 +1123,17 @@
       mxe = mx_e(myid)
       izs = iz_s(myid)
       ize = iz_e(myid)
+      iss = is_s(myid)
+      ise = is_e(myid)
 
-!     write(6,123)myid,izs,ize,iys,iye,iss,ise
-!123  format('myid = ',i6,' izs,ize = ',2i6,
-!    +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
 
-!     write(6,124)myid,ixs,ixe,jxs,jxe
-!124  format('myid = ',i6,' ixs,ixe = ',2i6,
-!    +       ' jxs,jxe = ',2i6)
+      write(nprt,123)myid,izs,ize,iys,iye,iss,ise
+ 123  format('myid = ',i6,' izs,ize = ',2i6,
+     +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
+
+      write(nprt,124)myid,ixs,ixe,jxs,jxe
+ 124  format('myid = ',i6,' ixs,ixe = ',2i6,
+     +       ' jxs,jxe = ',2i6)
 
       return
       end

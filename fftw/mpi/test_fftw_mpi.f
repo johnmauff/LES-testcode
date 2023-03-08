@@ -8,6 +8,10 @@
 !   izs:ize dimension on x_in/x_out (and equivalent) and increasing 
 !   batch to match.
 ! ======================================================================
+      module timing
+          integer, parameter :: niter=10
+          logical, parameter :: PrintTestSignal=.true.
+      end module timing
 
       module pars
 
