@@ -200,6 +200,11 @@
       call mpi_comm_rank(mpi_comm_world,myid,ierr)
       call mpi_comm_size(mpi_comm_world,numprocs,ierr)
 
+      if(numprocs < ncpu_s) then
+        print *,'ERROR: Executable currently build for a min of ',ncpu_s, 'MPI ranks'
+        call flush(6)
+        call MPI_abort(mpi_comm_world,ierr)
+      endif
       call init_nprt
       call gridd
       call build_wavenumbers
@@ -712,8 +717,10 @@
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
 
 !$acc host_data use_device(ft,gt)
+            print *,'xtoy_trans: nrecv: ',nrecv
             call mpi_irecv(gt(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
+            print *,'xtoy_trans: nsend: ',nsend
             call mpi_isend(ft(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
 !$acc end host_data

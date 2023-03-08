@@ -18,11 +18,11 @@
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 32
-         integer, parameter :: nny = 32
-         integer, parameter :: nnz = 32
+         integer, parameter :: nnx = 512
+         integer, parameter :: nny = 512
+         integer, parameter :: nnz = 512
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s = 2
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -32,6 +32,8 @@
 
          integer :: izs, ize, ixs, ixe, jxs, jxe, kxs, kxe,
      +              mxs, mxe, iss, ise, iys, iye, jys, jye
+!$acc declare create(izs,ize,ixs,ixe,jxs,jxe,kxs,kxe)
+!$acc declare create(mxs,mxe,iss,ise,iys,iye,jys,jye)
 
          integer :: myid, numprocs, ncpu_z, maxp
          logical :: l_root
@@ -207,6 +209,11 @@
       call mpi_init(ierr)
       call mpi_comm_rank(mpi_comm_world,myid,ierr)
       call mpi_comm_size(mpi_comm_world,numprocs,ierr)
+      if(numprocs < ncpu_s) then 
+        print *,'ERROR: Executable currently build for a min of ',ncpu_s, 'MPI ranks'
+        call flush(6)
+        call MPI_abort(mpi_comm_world,ierr)
+      endif
 
       call init_nprt
       call gridd
@@ -241,15 +248,12 @@
       write(*,*) 'Calling test_xderiv'
       jj = iys   ! index for printout
       call test_xderiv(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
-      write(*,*) 'Calling test_yderiv'
-      jj = jxs   ! index for printout
-      call test_yderiv(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
-      write(*,*) 'Calling test_fft2d'
-      jj = iys   ! index for printout
-      call test_fft2d(jj)
-      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+      !write(*,*) 'Calling test_yderiv'
+      !jj = jxs   ! index for printout
+      !call test_yderiv(jj)
+      !write(*,*) 'Calling test_fft2d'
+      !jj = iys   ! index for printout
+      !call test_fft2d(jj)
 
       ! ---- clean up
 
@@ -488,6 +492,7 @@
       ! ---- for printout
 !$acc data copy(at,ayt)
 
+      print *,'test_yderiv:'
       call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
@@ -617,6 +622,7 @@
             enddo
          enddo
 
+      print *,'fft2d_cuda'
          call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +        iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
 
@@ -658,6 +664,7 @@
          ! ---- decide whether to first transpose or leave as is
 
          if (isgn == 1) then
+      print *,'fft2d_cuda'
             call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
          endif
@@ -758,8 +765,10 @@
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
 
 !$acc host_data use_device(ft,gt)
+            !print *,'xtoy_trans: nrecv: ',nrecv
             call mpi_irecv(gt(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
+            !print *,'xtoy_trans: nsend: ',nsend
             call mpi_isend(ft(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
 !$acc end host_data
@@ -1055,10 +1064,20 @@
 
       ! ---- transpose so all y resides locally on each task
 
+
+      print *,'yd_cuda: HOST: myid, ixs,ixe,iys,iye: ',
+     + myid,ixs,ixe,iys,iye
+!$acc parallel
+      print *,'yd_cuda: DEVICE: myid, ixs,ixe,iys,iye: ',
+     + myid,ixs,ixe,iys,iye
+!$acc end parallel
+
 !$acc data create(ayt)
+      print *,'yd_cuda: '
       call xtoy_trans(ay,ayt,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
 
+      print *,'yd_cuda: completed xtoy_trans'
       ! ---- loop over z
 
       do k = iz1,iz2
@@ -1207,14 +1226,17 @@
       ize = iz_e(myid)
       iss = is_s(myid)
       ise = is_e(myid)
+!$acc update device(izs,ize,ixs,ixe,jxs,jxe)
+!$acc update device(kxs,kxe,mxs,mxe,iss,ise)
+!$acc update device(iys,iye,jys,jye)
 
-!     write(6,123)myid,izs,ize,iys,iye,iss,ise
-!123  format('myid = ',i6,' izs,ize = ',2i6,
-!    +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
+      write(6,123)myid,izs,ize,iys,iye,iss,ise
+123   format('myid = ',i6,' izs,ize = ',2i6,
+     +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
 
-!     write(6,124)myid,ixs,ixe,jxs,jxe
-!124  format('myid = ',i6,' ixs,ixe = ',2i6,
-!    +       ' jxs,jxe = ',2i6)
+      write(6,124)myid,ixs,ixe,jxs,jxe
+124   format('myid = ',i6,' ixs,ixe = ',2i6,
+     +       ' jxs,jxe = ',2i6)
 
       return
       end
