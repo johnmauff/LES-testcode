@@ -9,17 +9,17 @@
 !   batch to match.
 ! ======================================================================
       module timing
-          integer, parameter :: niter=10
-          logical, parameter :: PrintTestSignal=.true.
+          integer, parameter :: niter=100
+          logical, parameter :: PrintTestSignal=.false.
       end module timing
 
       module pars
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 32
-         integer, parameter :: nny = 32
-         integer, parameter :: nnz = 32
+         integer, parameter :: nnx = 512
+         integer, parameter :: nny = 512
+         integer, parameter :: nnz = 512
 
          integer, parameter :: ncpu_s = 2
 
@@ -354,7 +354,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -425,7 +425,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +        MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write (*,*) 'test_xderiv: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -472,6 +472,7 @@
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
       ! ---- for printout
+      if(PrintTestSignal) then 
 !$acc data copyout(at,ayt)
 
       call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
@@ -480,8 +481,7 @@
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 !$acc end data
 
-      if(PrintTestSignal) then 
-      do j=1,nnx
+      do i=1,nnx
          if (i==jj) then
             write(nprt,*)
             write(nprt,*) 'yderiv:'
@@ -511,7 +511,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION, 
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if(jj>=ixs .and. jj<=ixe) then 
+      if(myid.eq.0) then 
         write(*,*) 'test_yderiv: (sec) ',gdt/real(niter)
         call flush(6)
       endif
@@ -717,10 +717,8 @@
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
 
 !$acc host_data use_device(ft,gt)
-            print *,'xtoy_trans: nrecv: ',nrecv
             call mpi_irecv(gt(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
-            print *,'xtoy_trans: nsend: ',nsend
             call mpi_isend(ft(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
 !$acc end host_data

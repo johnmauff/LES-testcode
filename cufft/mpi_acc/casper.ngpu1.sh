@@ -19,4 +19,5 @@ export UCX_RNDV_THRESH=2
 
 
 # nsys profile --trace openacc,cuda,mpi mpirun -n 4 ./testx  >& 8v100.test_cufft.512.A.log
-mpirun -n 4 ./testx  >& test.log
+# mpirun -n 4 nvprof ./testx  >& test.log
+ mpirun -n 4 ./testx  >& test.log

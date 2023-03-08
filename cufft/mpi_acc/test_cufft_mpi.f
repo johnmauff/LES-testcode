@@ -10,7 +10,7 @@
 ! ======================================================================
 
       module timing
-          integer, parameter :: niter=10
+          integer, parameter :: niter=100
           logical, parameter :: PrintTestSignal=.false.
       end module timing
 
@@ -18,9 +18,9 @@
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 512
-         integer, parameter :: nny = 512
-         integer, parameter :: nnz = 512
+         integer, parameter :: nnx = 768
+         integer, parameter :: nny = 768
+         integer, parameter :: nnz = 768
 
          integer, parameter :: ncpu_s = 2
 
@@ -170,16 +170,16 @@
 ! Failing in Thread:1
 ! call to cuMemFree returned error 1: Invalid value
 
-!$acc exit data delete(xk_d,yk_d)
+!!$acc exit data delete(xk_d,yk_d)
            deallocate(xk_d, yk_d)
 
-!$acc exit data delete(x_in,x_out,x_out2)
+!!$acc exit data delete(x_in,x_out,x_out2)
            deallocate(x_in, x_out,x_out2)
 
-!$acc exit data delete(y_in,y_out,y_out2)
+!!$acc exit data delete(y_in,y_out,y_out2)
            deallocate(y_in, y_out,y_out2)
 
-!$acc exit data delete(c_in,c_out)
+!!$acc exit data delete(c_in,c_out)
            deallocate(c_in, c_out)
     
           return
@@ -245,15 +245,15 @@
       ! ---- perform tests
 
 
-      write(*,*) 'Calling test_xderiv'
+!      write(*,*) 'Calling test_xderiv'
       jj = iys   ! index for printout
       call test_xderiv(jj)
       !write(*,*) 'Calling test_yderiv'
-      !jj = jxs   ! index for printout
-      !call test_yderiv(jj)
+      jj = jxs   ! index for printout
+      call test_yderiv(jj)
       !write(*,*) 'Calling test_fft2d'
-      !jj = iys   ! index for printout
-      !call test_fft2d(jj)
+      jj = iys   ! index for printout
+      call test_fft2d(jj)
 
       ! ---- clean up
 
@@ -370,7 +370,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -443,7 +443,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +        MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (jj >= iys .and. jj <= iye) then
+      if (myid.eq.0) then
          write (*,*) 'test_xderiv: (sec) ',gdt/real(niter)
          call flush(6)
       endif
@@ -489,17 +489,18 @@
      +           nnx,nny,ixs,ixe,ix_s,ix_e,
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
+      if(PrintTestSignal) then
       ! ---- for printout
 !$acc data copy(at,ayt)
 
-      print *,'test_yderiv:'
+      print *,'test_yderiv: before first call to xtoy_trans'
       call xtoy_trans(a(1,iys,izs),at,nnx,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
+      print *,'test_yderiv: before second call to xtoy_trans'
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 !$acc end data
 
-      if(PrintTestSignal) then
       do i=1,nnx
          if (i==jj) then
            write(nprt,*)
@@ -535,7 +536,7 @@
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if(jj>=ixs .and. jj<=ixe) then
+      if(myid.eq.0) then
         write(*,*) 'test_yderiv: (sec) ',gdt/real(niter)
         call flush(6)
       endif
@@ -622,7 +623,7 @@
             enddo
          enddo
 
-      print *,'fft2d_cuda'
+      ! print *,'fft2d_cuda'
          call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +        iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
 
@@ -664,7 +665,7 @@
          ! ---- decide whether to first transpose or leave as is
 
          if (isgn == 1) then
-      print *,'fft2d_cuda'
+      ! print *,'fft2d_cuda'
             call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
      +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
          endif
@@ -868,8 +869,8 @@
  
 !$acc parallel loop gang vector collapse(3) default(present)
       do k = izs,ize
-         do j = iys,iye
          do i = ixs,ixe
+         do j = iys,iye
             g(j,i,k) = gt(i,j,k)
          enddo
          enddo
@@ -905,8 +906,8 @@
  
 !$acc parallel loop gang vector collapse(3) default(present)
       do k = izs,ize
-         do i = ixs,ixe
          do j = iys,iye
+         do i = ixs,ixe
             f(i,j,k) = ft(j,i,k)
          enddo
          enddo
@@ -998,7 +999,8 @@
          x_out2(2,j)   = 0.0
 !$acc loop worker vector
          do i = 3,nx-1,2
-            ii            = ii + 1
+            !ii            = ii + 1
+            ii           = ((j-3)/2)+2
             x_out2(i,j)   = -xk_d(ii)*x_out(i+1,j)
             x_out2(i+1,j) = xk_d(ii)*x_out(i,j)
          enddo
@@ -1065,19 +1067,19 @@
       ! ---- transpose so all y resides locally on each task
 
 
-      print *,'yd_cuda: HOST: myid, ixs,ixe,iys,iye: ',
-     + myid,ixs,ixe,iys,iye
+!      print *,'yd_cuda: HOST: myid, ixs,ixe,iys,iye: ',
+!     + myid,ixs,ixe,iys,iye
 !$acc parallel
-      print *,'yd_cuda: DEVICE: myid, ixs,ixe,iys,iye: ',
-     + myid,ixs,ixe,iys,iye
+!      print *,'yd_cuda: DEVICE: myid, ixs,ixe,iys,iye: ',
+!     + myid,ixs,ixe,iys,iye
 !$acc end parallel
 
 !$acc data create(ayt)
-      print *,'yd_cuda: '
+!      print *,'yd_cuda: '
       call xtoy_trans(ay,ayt,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
 
-      print *,'yd_cuda: completed xtoy_trans'
+!      print *,'yd_cuda: completed xtoy_trans'
       ! ---- loop over z
 
       do k = iz1,iz2
@@ -1108,7 +1110,8 @@
             y_out2(2,i) = 0.0
 !$acc loop worker vector
             do j = 3,ny-1,2
-               ii           = ii + 1
+               !ii           = ii + 1
+               ii           = ((j-3)/2)+2
                y_out2(j,i)   = -yk_d(ii)*y_out(j+1,i)
                y_out2(j+1,i) = yk_d(ii)*y_out(j,i)
             enddo
