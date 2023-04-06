@@ -28,7 +28,7 @@ ifeq (${FC},ifort)
   #  module load oneapi/2023.0.0 
   #  module load fftw
   #OPTS += -r8 -assume byterecl -I${NCAR_INC_FFTW}/include/fftw -L${NCAR_LDFLAGS_FFTW}/lib -lfftw3
-  OPTS += -r8 -assume byterecl -lfftw3
+  OPTS += -r8 -O3 -assume byterecl -lfftw3
 endif
 
 

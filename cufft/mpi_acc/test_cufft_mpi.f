@@ -10,7 +10,7 @@
 ! ======================================================================
 
       module timing
-          integer, parameter :: niter=100
+          integer, parameter :: niter=30
           logical, parameter :: PrintTestSignal=.false.
       end module timing
 
@@ -18,11 +18,11 @@
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 768
-         integer, parameter :: nny = 768
-         integer, parameter :: nnz = 768
+         integer, parameter :: nnx = 1024
+         integer, parameter :: nny = 1024
+         integer, parameter :: nnz = 1024
 
-         integer, parameter :: ncpu_s = 2
+         integer, parameter :: ncpu_s = 8
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2

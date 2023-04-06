@@ -17,11 +17,11 @@
 
          integer, parameter :: i_fft = 1   ! == 1 -> FFTW
 
-         integer, parameter :: nnx = 32
-         integer, parameter :: nny = 32
-         integer, parameter :: nnz = 32
+         integer, parameter :: nnx = 128
+         integer, parameter :: nny = 128
+         integer, parameter :: nnz = 128
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s = 4
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
