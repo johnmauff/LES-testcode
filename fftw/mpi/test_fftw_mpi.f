@@ -17,9 +17,9 @@
 
          integer, parameter :: i_fft = 1   ! == 1 -> FFTW
 
-         integer, parameter :: nnx = 1536
-         integer, parameter :: nny = 1536
-         integer, parameter :: nnz = 1536
+         integer, parameter :: nnx = 512
+         integer, parameter :: nny = 512
+         integer, parameter :: nnz = 512
 
          integer, parameter :: ncpu_s = 8
 
