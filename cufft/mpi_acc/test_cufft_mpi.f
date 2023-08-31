@@ -57,7 +57,6 @@
 
       module fields
          real, allocatable, dimension(:,:,:) :: a,b,ay
-!         real, allocatable, dimension(:,:)   :: ax
          real, allocatable, dimension(:,:,:) :: axB
       end module fields
 
@@ -164,16 +163,9 @@
     
           ! ---- deallocate vars
     
-!!$acc exit data delete(xk_d,yk_d)
            deallocate(xk_d, yk_d)
-
-!!$acc exit data delete(x_in,x_out)
            deallocate(x_in,x_out,x_out2)
-
-!!$acc exit data delete(y_in,y_out,y_out2)
            deallocate(y_in, y_out,y_out2)
-
-!!$acc exit data delete(c_in,c_out)
            deallocate(c_in, c_out)
     
           return
@@ -221,9 +213,7 @@
       allocate( a(nnx+2,iys:iye,izs-1:ize+1) )
       allocate( b(nny,  jxs:jxe,izs-1:ize+1) )
 
-!      allocate( ax(nnx,iys:iye) )
       allocate( ay(nnx,iys:iye,izs:ize) )
-
       allocate( axB(nnx,iys:iye,nblockz) )
 
 !$acc enter data create(a,b,ay)
@@ -257,10 +247,8 @@
     
 !$acc exit data delete(a,b,ay)
 !$acc exit data delete(axB)
-
       deallocate(a)
       deallocate(b)
-!      deallocate(ax)
       deallocate(axB)
       deallocate(ay)
       deallocate(trigx)
@@ -406,6 +394,7 @@
 
       dx = xl / dble(nnx)
 
+      ! First look at correctness
       do k = izs,ize,nblockz
          do k1=1,nblockz
          do j=iys,iye
@@ -434,6 +423,7 @@
          endif
       end do
 
+      ! Next evaluate for performance
 !$acc parallel loop gang vector collapse(3) default(present)
       do k1=1,nblockz
       do j=iys,iye
@@ -797,10 +787,8 @@
      +                  iy_s(myid),iy_e(myid),iz1,iz2)
 
 !$acc host_data use_device(ft,gt)
-            !print *,'xtoy_trans: nrecv: ',nrecv
             call mpi_irecv(gt(1),nrecv,mpi_real8,ir,1,
      +                     mpi_comm_world,ireqr,ierr)
-            !print *,'xtoy_trans: nsend: ',nsend
             call mpi_isend(ft(1),nsend,mpi_real8,is,1,
      +                     mpi_comm_world,ireqs,ierr)
 !$acc end host_data
@@ -1052,16 +1040,6 @@
       ierr = cufftExecZ2D(pln_xb, x_out2, ax)
 !$acc end host_data
 
-      ! ---- copy data back to host
-
-!!$acc parallel loop gang vector collapse(3) default(present)
-!      do k1=1,nblockz
-!      do j = iys,iye
-!         do i = 1,nx
-!            ax(i,j,k1) = x_out2(i,j,k1)
-!         enddo
-!      enddo
-!      enddo
 
       return
       end subroutine xd_cuda
@@ -1108,19 +1086,10 @@
       ! ---- transpose so all y resides locally on each task
 
 
-!      print *,'yd_cuda: HOST: myid, ixs,ixe,iys,iye: ',
-!     + myid,ixs,ixe,iys,iye
-!$acc parallel
-!      print *,'yd_cuda: DEVICE: myid, ixs,ixe,iys,iye: ',
-!     + myid,ixs,ixe,iys,iye
-!$acc end parallel
-
 !$acc data create(ayt)
-!      print *,'yd_cuda: '
       call xtoy_trans(ay,ayt,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
 
-!      print *,'yd_cuda: completed xtoy_trans'
       ! ---- loop over z
 
       do k = iz1,iz2,nblockz

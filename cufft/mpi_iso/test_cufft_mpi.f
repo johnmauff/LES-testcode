@@ -166,11 +166,8 @@
           ! ---- deallocate vars
     
            deallocate(xk_d, yk_d)
-
            deallocate(x_in, x_out,x_out2)
-
            deallocate(y_in, y_out,y_out2)
-
            deallocate(c_in, c_out)
     
           return
@@ -943,12 +940,6 @@
       ierr = cufftExecZ2D(pln_xb, x_out2, ax)
 !$acc end host_data
 
-      ! ---- copy data back to host
-
-!      do concurrent (j=iys:iye,i=1:nx)
-!         ax(i,j) = x_out2(i,j)
-!      enddo
-
       return
       end subroutine xd_cuda
 
@@ -980,6 +971,7 @@
 
       use cufft
       use cufft_wrk
+      use pars, only: nblocksz
 
       integer, intent(in) :: nx,ny,ixs,ixe,iys,iye,iz1,iz2,myid,ncpu,np
       integer, intent(in), dimension(0:np-1) :: ix_s, ix_e, iy_s, iy_e
