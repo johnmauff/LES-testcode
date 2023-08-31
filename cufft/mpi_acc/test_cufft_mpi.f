@@ -339,6 +339,7 @@
       end do
 
       time_forwardX=0.0d0
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
          ! ---- forward transform
@@ -433,6 +434,7 @@
       end do
       end do
       end do
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
         do k = izs,ize,nblockz
@@ -524,6 +526,7 @@
       enddo
       enddo
 
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
          call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),

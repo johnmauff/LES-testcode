@@ -9,7 +9,7 @@
 !   batch to match.
 ! ======================================================================
       module timing
-          integer, parameter :: niter=10
+          integer, parameter :: niter=100
           logical, parameter :: PrintTestSignal=.false.
       end module timing
 
@@ -22,7 +22,7 @@
          integer, parameter :: nnz = 1024
 
          integer, parameter :: ncpu_s  = 2
-         integer, parameter :: nblockz = 64
+         integer, parameter :: nblockz = 32
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -104,6 +104,8 @@
           do j = 1,ny_c
              yk_d(j) = yk(j)
           enddo
+
+! update values of xk_d,yk_d on device
 !$acc update device(xk_d,yk_d)
 
           ! ---- build plans 
@@ -216,6 +218,7 @@
       allocate( ay(nnx,iys:iye,izs:ize) )
       allocate( axB(nnx,iys:iye,nblockz) )
 
+!   Allocate variables on device
 !$acc enter data create(a,b,ay)
 !$acc enter data create(axB)
 
@@ -231,6 +234,10 @@
          call cufft_config(xk,yk)
       endif
 
+      if(myid.eq.0) then 
+         write (*,200) nnx,nny,nnz,ncpu_s,nblockz
+      endif
+ 200  format ('Global config : (',i5,',',i5,',',i5,',',i3,',',i3,')')
       ! ---- perform tests
 
       jj = iys   ! index for printout
@@ -244,6 +251,7 @@
 
       call cufft_finalize
     
+! deallocate variables on the device
 !$acc exit data delete(a,b,ay)
 !$acc exit data delete(axB)
       deallocate(a)
@@ -331,6 +339,7 @@
          a(i,j,k) = sin(dble(i-1)*dx)
       end do
 
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
          ! ---- forward transform
@@ -414,6 +423,7 @@
          a(i,j,1) = sin(dble(i-1)*dx)
          axB(i,j,k1) = a(i,j,1)
       end do
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
         do k = izs,ize,nblockz
@@ -446,7 +456,7 @@
       use timing
       include 'mpif.h'
 
-      real ::  at(nny,ixs:ixe,izs:ize)
+      real ::  at(nny,jxs:jxe,izs:ize)
       real :: ayt(nny,ixs:ixe,izs:ize)
 
       integer, intent(in) :: jj
@@ -464,7 +474,9 @@
       enddo
       enddo
 
+! Update variables a,ay on the device
 !$acc update device(a,ay)
+
 
       call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
      +           nnx,nny,ixs,ixe,ix_s,ix_e,
@@ -472,6 +484,7 @@
 
       ! ---- for printout
       if(PrintTestSignal) then 
+
 !$acc data copyout(at,ayt)
 
       call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
@@ -500,6 +513,7 @@
          ay(i,j,k) = a(i,j,k)
       enddo
 
+      call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
          call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
@@ -579,15 +593,15 @@
 
          do k = iz1,iz2,nblockz
             do concurrent (k1=1:nblockz,j=iys:iye,i=1:nx)
-               x_in(i,j,k1) = ax(i,j,k+k1-1)*fn                ! note: currently shifting one x-y slab to device
+               x_in(i,j,k1) = ax(i,j,k+k1-1)*fn                ! fill temp variable dimensioned to nx+2*nblockz
             enddo
 
 !$acc host_data use_device(x_in,x_out)
-            ierr = cufftExecD2Z(pln_xf,x_in,x_out)        ! perform forward R2C 1D ffts in x-direction for [iys,iye]
+            ierr = cufftExecD2Z(pln_xf,x_in,x_out)        ! perform forward R2C 1D ffts in x-direction for [iys,iye]*nblockz
 !$acc end host_data
 
             do concurrent (k1=1:nblockz,j=iys:iye,i=1:nxp2)
-               ax(i,j,k+k1-1) = x_out(i,j,k1)                  ! note: shifting data back to host 
+               ax(i,j,k+k1-1) = x_out(i,j,k1)                  ! store results 
             enddo
          enddo
 
@@ -599,17 +613,17 @@
          do k = iz1,iz2,nblockz
             do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               c_in(1,j,ij,k1) = at(j,i,k+k1-1)                 ! note: shifting data to device here
+               c_in(1,j,ij,k1) = at(j,i,k+k1-1)                 ! fill temp variable
                c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
             enddo
 
 !$acc host_data use_device(c_in,c_out)
-            ierr = cufftExecZ2Z(pln_cf, c_in, c_out, CUFFT_FORWARD) ! perform forward C2C 1D ffts in y for [jxs,jxe]/2
+            ierr = cufftExecZ2Z(pln_cf, c_in, c_out, CUFFT_FORWARD) !  perform forward C2C 1D ffts in y for [jxs,jxe]/2*nblockz
 !$acc end host_data
 
             do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)              ! note: shifting data back to host here
+               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)              ! store results
                at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
             enddo
          enddo
@@ -635,7 +649,7 @@
          do k = iz1,iz2,nblockz
             do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               c_in(1,j,ij,k1) = at(j,i,k+k1-1)
+               c_in(1,j,ij,k1) = at(j,i,k+k1-1)        ! fill temporary variable
                c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
             enddo
 
@@ -646,7 +660,7 @@
             do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ! ij = floor(real(i-jxs)/2.0)+1
                ij = ((i-jxs)/2)+1
-               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)
+               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)      ! store results
                at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
             enddo
          enddo
@@ -658,15 +672,15 @@
 
          do k = iz1,iz2,nblockz
             do concurrent (k1=1:nblockz,j=iys:iye,i=1:nxp2)
-               x_out(i,j,k1) = ax(i,j,k+k1-1)               ! note: shifting data to device
+               x_out(i,j,k1) = ax(i,j,k+k1-1)               ! fill temp variable
             enddo
 
 !$acc host_data use_device(x_out)
-            ierr = cufftExecZ2D(pln_xb, x_out, x_out)  ! perform backward 1D C2R ffts in x-direction for entire yz-tube
+            ierr = cufftExecZ2D(pln_xb, x_out, x_out)  ! perform backward 1D C2R ffts in x-direction for [iys:iye]*nblockz tube
 !$acc end host_data
 
             do concurrent (k1=1:nblockz,j=iys:iye,i=1:nx)
-               ax(i,j,k+k1-1) = x_out(i,j,k1)               ! note: shifting data back to host
+               ax(i,j,k+k1-1) = x_out(i,j,k1)               ! store results from this nblockz
             enddo
          enddo
 
@@ -912,7 +926,7 @@
          x_in(i,j,k1) = ax(i,j,k1)*fn
       enddo
 
-      ! ---- forward 1D fft in x for all [iys,iye]
+      ! ---- forward 1D fft in x for all [iys*iye]*nblockz
 
 !$acc host_data use_device(x_in,x_out)
       ierr = cufftExecD2Z(pln_xf, x_in, x_out)
@@ -971,7 +985,7 @@
 
       use cufft
       use cufft_wrk
-      use pars, only: nblocksz
+      use pars, only: nblockz
 
       integer, intent(in) :: nx,ny,ixs,ixe,iys,iye,iz1,iz2,myid,ncpu,np
       integer, intent(in), dimension(0:np-1) :: ix_s, ix_e, iy_s, iy_e
@@ -998,7 +1012,7 @@
             y_in(j,i,k1) = ayt(j,i,k+k1-1)*fn
          enddo
 
-         ! ---- forward 1D fft in y for all [ixs:ixe]
+         ! ---- forward 1D fft in y for all [ixs:ixe]*nblockz
 
 !$acc host_data use_device(y_in,y_out)
          ierr = cufftExecD2Z(pln_yf, y_in, y_out)
@@ -1026,8 +1040,7 @@
          ierr = cufftExecZ2D(pln_yb, y_out2, y_out2)
 !$acc end host_data
 
-         ! ---- copy data back to host
-
+         ! ---- store results for this nblockz
          do concurrent (k1=1:nblockz,i=ixs:ixe,j=1:ny)
             ayt(j,i,k+k1-1) = y_out2(j,i,k1)
          enddo
@@ -1124,11 +1137,10 @@
       ize = iz_e(myid)
       iss = is_s(myid)
       ise = is_e(myid)
+
 !$acc update device(izs,ize,ixs,ixe,jxs,jxe)
 !$acc update device(kxs,kxe,mxs,mxe,iss,ise)
 !$acc update device(iys,iye,jys,jye)
-
-
 
       write(nprt,123)myid,izs,ize,iys,iye,iss,ise
  123  format('myid = ',i6,' izs,ize = ',2i6,
