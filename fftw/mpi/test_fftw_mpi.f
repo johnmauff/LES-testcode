@@ -8,20 +8,23 @@
 !   izs:ize dimension on x_in/x_out (and equivalent) and increasing 
 !   batch to match.
 ! ======================================================================
+
       module timing
-          integer, parameter :: niter=100
+          integer, parameter :: niter = 10
           logical, parameter :: PrintTestSignal=.true.
       end module timing
 
+! ======================================================================
+
       module pars
 
-         integer, parameter :: i_fft = 1   ! == 1 -> FFTW
+         integer, parameter :: i_fft = 1
 
-         integer, parameter :: nnx = 512
-         integer, parameter :: nny = 512
-         integer, parameter :: nnz = 512
+         integer, parameter :: nnx = 1024
+         integer, parameter :: nny = 1024
+         integer, parameter :: nnz = 1024
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s = 64
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -153,11 +156,8 @@ c
       jj = iys   ! index for printout
       call test_xderiv(jj)
 
-      jj = jxs   ! index for printout
-      call test_yderiv(jj)
-
-      jj = iys   ! index for printout
-      call test_fft2d(jj)
+      call test_yderiv
+      call test_fft2d
 
       ! ---- clean up
 
@@ -175,7 +175,7 @@ c
 
 ! ======================================================================
 
-      subroutine test_fft2d(jj)
+      subroutine test_fft2d
 
       ! ---- routine to test fft2d
 
@@ -185,9 +185,8 @@ c
       use fftwk
       use timing
       include 'mpif.h'
-      double precision :: st,et,ldt,gdt
-
-      integer, intent(in) :: jj
+      double precision :: et,st,ldt,gdt
+      integer :: ierr
 
       real, dimension(nnx) :: ai
 
@@ -205,11 +204,9 @@ c
 
       ! ---- grab desired line from the initial array for printout
 
-      if (jj >= iys .and. jj <= iye) then
-         do i = 1,nnx
-            ai(i)  = a(i,jj,izs)
-         enddo
-      endif
+      do i = 1,nnx
+         ai(i)  = a(i,iys,izs)
+      enddo
 
       ! ---- forward transform
 
@@ -225,17 +222,15 @@ c
 
       ! ---- check ouput array
 
-      if(PrintTestSignal) then
-      if (jj >= iys .and. jj <= iye) then
-         write(nprt,*)
-         write(nprt,*) 'fft2d:'
+      write(nprt,*)
+      write(nprt,*) 'test_fft2d:'
 
-         do i = 1,nnx
-            write(nprt,100) dble(i-1)*dx, ai(i), a(i,jj,izs)
-         enddo
- 100     format(' x = ',f,' , send = ',f,' , recv = ',f)
-      endif
-      endif
+      do i = 1,nnx
+         write(nprt,100) dble(i-1)*dx, ai(i), a(i,iys,izs)
+      enddo
+ 100  format(' x = ',f,' , send = ',f,' , recv = ',f)
+
+      ! ---- now test performance
 
       do k = izs,ize
          do j = iys,iye
@@ -245,8 +240,8 @@ c
          end do
       end do
 
-      st = MPI_Wtime()
-      do it=1,niter
+      st = mpi_wtime()
+      do it = 1,niter
          ! ---- forward transform
 
          call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
@@ -259,15 +254,14 @@ c
      +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
      +           izs,ize,myid,ncpu_s,numprocs,2)
       enddo
-      et = MPI_Wtime()
+      et = mpi_wtime()
       ldt = et-st
-      call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
-     +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if (myid.eq.0) then
-         write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
+      call mpi_allreduce(ldt,gdt,1,mpi_double_precision,
+     +         mpi_max,mpi_comm_world,ierr)
+      if (myid == 0) then
+         write(6,*) 'test_fft2d: (sec) ',gdt/dble(niter)
          call flush(6)
       endif
-
 
       return
       end subroutine test_fft2d
@@ -285,6 +279,7 @@ c
       use timing
       include 'mpif.h'
       double precision :: st,et,ldt,gdt
+      integer :: ierr
 
       integer, intent(in) :: jj
 
@@ -300,10 +295,8 @@ c
          end do
          end do
          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
-      end do
 
-      if(PrintTestSignal) then 
-         if (jj >= iys .and. jj <= iye) then
+         if (k == izs) then
             write(nprt,*)
             write(nprt,*) 'xderiv:'
             do i = 1,nnx
@@ -311,35 +304,35 @@ c
             enddo
  100        format(' x = ',f,' , a = ',f,' , ax = ',f)
          endif
-      endif
-      do j = iys,iye
-      do i = 1,nnx
-         a(i,j,k) = sin(dble(i-1)*dx)
-         ax(i,j) = a(i,j,k)
       end do
-      end do
+
+      ! Next evaluate for performance
       st = MPI_Wtime()
-      do it=1,niter
-      do k = izs,ize
-         call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
+      do it = 1,niter
+         do k = izs,ize
+            do j = iys,iye
+            do i = 1,nnx
+               ax(i,j) = sin(dble(i-1)*dx)
+            end do
+            end do
+            call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
+         end do
       end do
-      enddo
       et = MPI_Wtime()
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +        MPI_MAX,MPI_COMM_WORLD,ierr)
       if (myid.eq.0) then
-         write (*,*) 'test_xderiv: (sec) ',gdt/real(niter)
+         write (*,*) 'test_xderiv: (sec) ',gdt/dble(niter)
          call flush(6)
       endif
-
 
       return
       end subroutine test_xderiv
 
 ! ======================================================================
 
-      subroutine test_yderiv(jj)
+      subroutine test_yderiv
 
       ! ---- routine to test yderiv
 
@@ -349,12 +342,12 @@ c
       use fftwk
       use timing
       include 'mpif.h'
-      double precision :: st,et,ldt,gdt
+      integer :: ierr
+
+      double precision :: et,st,ldt,gdt
 
       real ::  at(nny,jxs:jxe,izs:ize)
       real :: ayt(nny,ixs:ixe,izs:ize)
-
-      integer, intent(in) :: jj
 
       dy = yl / dble(nny)
 
@@ -377,43 +370,38 @@ c
       call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 
-      if(PrintTestSignal) then
-      if (jj >= ixs .and. jj <= ixe) then
+      write(nprt,*)
+      write(nprt,*) 'yderiv:'
+      do j = 1,nny
+         write(nprt,100) dble(j-1)*dy,at(j,jxs,izs),ayt(j,ixs,izs)
+      enddo
+ 100  format(' y = ',f,' , a = ',f,' , ay = ',f)
+      call flush(nprt)
 
-            write(nprt,*)
-            write(nprt,*) 'yderiv:'
+      ! ---- measure performance
 
-            i = jj
-            do j = 1,nny
-               write(nprt,100) dble(j-1)*dy,at(j,i,izs),ayt(j,i,izs)
-            enddo
- 100        format(' y = ',f,' , a = ',f,' , ay = ',f)
-      endif
-      endif
       do k = izs,ize
          do j = iys,iye
          do i = 1,nnx
-             a(i,j,k) = sin(dble(j-1)*dy)
-            ay(i,j,k) = a(i,j,k)
-         end do
-         end do
+            ay(i,j,k) = sin(dble(j-1)*dy)
+         enddo
+         enddo
       enddo
-      st = MPI_Wtime()
-      do it=1,niter
-      call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
+
+      st = mpi_wtime()
+      do it = 1,niter
+         call yd_mpi(ay(1,iys,izs),trigx(1,2),yk(1),
      +           nnx,nny,ixs,ixe,ix_s,ix_e,
      +           iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
       enddo
-      et = MPI_Wtime()
+      et = mpi_wtime()
       ldt = et-st
-      call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
-     +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      if(myid.eq.0) then
-        write(*,*) 'test_yderiv: (sec) ',gdt/real(niter)
-        call flush(6)
+      call mpi_allreduce(ldt,gdt,1,mpi_double_precision,
+     +         mpi_max,mpi_comm_world,ierr)
+      if (myid == 0) then
+         write(*,*) 'test_yderiv: (sec) ',gdt/dble(niter)
+         call flush(6)
       endif
-
-
 
       return
       end subroutine test_yderiv
@@ -778,22 +766,22 @@ c
 ! ======================================================================
 
       subroutine xd_fftw(ax,xk,nnx,iys,iye)
-c
-c -------- get multiple x derivatives using fftw routines
-c
+ 
+      ! ---- get multiple x derivatives using fftw routines
+ 
       use fftw_wrk
       real xk(nnx), ax(nnx,iys:iye)
-c
-c     fn = 1.0/float(nnx)
-      do iy=iys,iye
-         do i=1,nnx
-            x_in(i) = ax(i,iy)
+ 
+!     fn = 1.0/float(nnx)
+      do j = iys,iye
+         do i = 1,nnx
+            x_in(i) = ax(i,j)
          enddo
          call dfftw_execute_dft_r2c(pln_xf, x_in, x_out)
-         ii           = 1
-         x_out(1)     = 0.0
-         x_out(2)     = 0.0
-         do i=3,nnx-1,2
+         ii       = 1
+         x_out(1) = 0.0
+         x_out(2) = 0.0
+         do i = 3,nnx-1,2
             ii         = ii + 1
             temp       = x_out(i)
             x_out(i)   = -xk(ii)*x_out(i+1)
@@ -802,11 +790,11 @@ c     fn = 1.0/float(nnx)
          x_out(nnx+1) = 0.0
          x_out(nnx+2) = 0.0
          call dfftw_execute_dft_c2r(pln_xb, x_out, x_out)
-         do i=1,nnx
-            ax(i,iy) = x_out(i)
+         do i = 1,nnx
+            ax(i,j) = x_out(i)
          enddo
       enddo
-c
+ 
       return
       end
 
@@ -822,8 +810,8 @@ c
       use pars, only : i_fft
 
       if(i_fft == 1) then
-         call yd_mpi_fftw(ay,yk,nx,ny,ixs,ixe,ix_s,ix_e,
-     +                    iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
+         call yd_fftw(ay,yk,nx,ny,ixs,ixe,ix_s,ix_e,
+     +                iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
       endif
 
       return
@@ -831,22 +819,22 @@ c
 
 ! ======================================================================
 
-      subroutine yd_mpi_fftw(ay,yk,
+      subroutine yd_fftw(ay,yk,
      +           nx,ny,ixs,ixe,ix_s,ix_e,
      +           iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-c
+ 
 c -------- get multiple y derivatives using fftw routines
-c
+ 
       use fftw_wrk
       real yk(ny), ay(nx,iys:iye,iz1:iz2)
       real ayt(ny,ixs:ixe,iz1:iz2)
-c
+ 
       integer ix_s(0:np-1), ix_e(0:np-1),
      +        iy_s(0:np-1), iy_e(0:np-1)
-c
+ 
       call xtoy_trans(ay,ayt,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-c
+ 
 c     fn = 1.0/float(nny)
       do iz=iz1,iz2
          do ix=ixs,ixe
@@ -873,7 +861,7 @@ c     fn = 1.0/float(nny)
       enddo
       call ytox_trans(ayt,ay,nx,ny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,iz1,iz2,myid,ncpu,np)
-c
+ 
       return
       end
 
@@ -956,13 +944,13 @@ c
       izs = iz_s(myid)
       ize = iz_e(myid)
 
-!     write(*,123)myid,izs,ize,iys,iye,iss,ise
-!123  format('myid = ',i6,' izs,ize = ',2i6,
-!    +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
+      write(nprt,123)myid,izs,ize,iys,iye,iss,ise
+ 123  format('myid = ',i6,' izs,ize = ',2i6,
+     +       ' iys,iye = ',2i6,' iss,ise = ',2i6)
 
-!     write(*,124)myid,ixs,ixe,jxs,jxe
-!124  format('myid = ',i6,' ixs,ixe = ',2i6,
-!    +       ' jxs,jxe = ',2i6)
+      write(nprt,124)myid,ixs,ixe,jxs,jxe
+ 124  format('myid = ',i6,' ixs,ixe = ',2i6,
+     +       ' jxs,jxe = ',2i6)
 
       return
       end
