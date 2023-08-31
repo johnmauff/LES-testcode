@@ -9,7 +9,7 @@
 !   batch to match.
 ! ======================================================================
       module timing
-          integer, parameter :: niter=100
+          integer, parameter :: niter=10
           logical, parameter :: PrintTestSignal=.false.
       end module timing
 
@@ -17,11 +17,12 @@
 
          integer, parameter :: i_fft = 2   ! == 2 -> cuFFT
 
-         integer, parameter :: nnx = 768
-         integer, parameter :: nny = 768
-         integer, parameter :: nnz = 768
+         integer, parameter :: nnx = 1024
+         integer, parameter :: nny = 1024
+         integer, parameter :: nnz = 1024
 
-         integer, parameter :: ncpu_s = 8
+         integer, parameter :: ncpu_s  = 2
+         integer, parameter :: nblockz = 64
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -31,6 +32,9 @@
 
          integer :: izs, ize, ixs, ixe, jxs, jxe, kxs, kxe,
      +              mxs, mxe, iss, ise, iys, iye, jys, jye
+!$acc declare create(izs,ize,ixs,ixe,jxs,jxe,kxs,kxe)
+!$acc declare create(mxs,mxe,iss,ise,iys,iye,jys,jye)
+
 
          integer :: myid, numprocs, ncpu_z, maxp
          logical :: l_root
@@ -53,7 +57,7 @@
 
       module fields
          real, allocatable, dimension(:,:,:) :: a,b,ay
-         real, allocatable, dimension(:,:)   :: ax
+         real, allocatable, dimension(:,:,:)   :: axB
       end module fields
 
 ! ======================================================================
@@ -74,17 +78,18 @@
         real, allocatable :: xk_d(:), yk_d(:)
 !$acc declare create (xk_d,yk_d)
 
-        real, allocatable :: x_in(:,:), x_out(:,:), x_out2(:,:),
-     +                       y_in(:,:), y_out(:,:), y_out2(:,:),
-     +                               c_in(:,:,:), c_out(:,:,:)
+        real, allocatable :: x_in(:,:,:), x_out(:,:,:), x_out2(:,:,:)
+        real, allocatable :: y_in(:,:,:), y_out(:,:,:), y_out2(:,:,:)
+        real, allocatable :: c_in(:,:,:,:), c_out(:,:,:,:)
 !$acc declare create (x_in,x_out,x_out2)
-!$acc declare create (y_in,y_out,y_out2,c_in,c_out)
+!$acc declare create (c_in,c_out)
+!$acc declare create (y_in,y_out,y_out2)
 
         contains
 
           subroutine cufft_config(xk,yk)
 
-          use pars, only : iys,iye,ixs,ixe,jxs,jxe
+          use pars, only : iys,iye,ixs,ixe,jxs,jxe,nblockz
          
           real, intent(in) :: xk(nx_c), yk(ny_c)
           integer :: jj, batch
@@ -112,34 +117,34 @@
           !  for in-place R2C and C2R transforms, the input
           !  size must be padded to N/2+1 complex elements.
 
-          allocate( x_in(nx_c,  iys:iye)) 
-          allocate(x_out(nx_c+2,iys:iye))
-          allocate(x_out2(nx_c+2,iys:iye))
+          allocate( x_in(nx_c,  iys:iye,nblockz)) 
+          allocate(x_out(nx_c+2,iys:iye,nblockz))
+          allocate(x_out2(nx_c+2,iys:iye,nblockz))
 
-          allocate( y_in(ny_c,  ixs:ixe))
-          allocate(y_out(ny_c+2,ixs:ixe))
-          allocate(y_out2(ny_c+2,ixs:ixe))
+          allocate( y_in(ny_c,  ixs:ixe,nblockz))
+          allocate(y_out(ny_c+2,ixs:ixe,nblockz))
+          allocate(y_out2(ny_c+2,ixs:ixe,nblockz))
 
           jj = (jxe-jxs+1)/2
-          allocate(c_in(2,ny_c,jj), c_out(2,ny_c,jj))
+          allocate(c_in(2,ny_c,jj,nblockz), c_out(2,ny_c,jj,nblockz))
 
           ! ---- plans for x
 
-          batch = iye-iys+1       ! --- number of 1D ffts to execute
+          batch = (iye-iys+1)*nblockz       ! --- number of 1D ffts to execute
 
           ierr = cufftPlan1D(pln_xf,nx_c,CUFFT_D2Z,batch)  ! R2C => single prec, D2Z => double
           ierr = cufftPlan1D(pln_xb,nx_c,CUFFT_Z2D,batch)  ! C2R => single prec, Z2D => double
 
           ! ---- plans for y
 
-          batch = ixe-ixs+1       ! --- number of 1D ffts to execute
+          batch = (ixe-ixs+1)*nblockz       ! --- number of 1D ffts to execute
 
           ierr = cufftPlan1D(pln_yf,ny_c,CUFFT_D2Z,batch)
           ierr = cufftPlan1D(pln_yb,ny_c,CUFFT_Z2D,batch)
 
           ! ---- plans for complex in y
 
-          batch = (jxe-jxs+1)/2   ! --- number of 1D ffts to execute
+          batch = ((jxe-jxs+1)/2)*nblockz   ! --- number of 1D ffts to execute
 
           ierr = cufftPlan1D(pln_cf,ny_c,CUFFT_Z2Z,batch)
           ierr = cufftPlan1D(pln_cb,ny_c,CUFFT_Z2Z,batch)
@@ -160,16 +165,12 @@
     
           ! ---- deallocate vars
     
-!$acc exit data delete(xk_d,yk_d)
            deallocate(xk_d, yk_d)
 
-!$acc exit data delete(x_in,x_out,x_out2)
            deallocate(x_in, x_out,x_out2)
 
-!$acc exit data delete(y_in,y_out,y_out2)
            deallocate(y_in, y_out,y_out2)
 
-!$acc exit data delete(c_in,c_out)
            deallocate(c_in, c_out)
     
           return
@@ -215,10 +216,11 @@
       allocate( a(nnx+2,iys:iye,izs-1:ize+1) )
       allocate( b(nny,  jxs:jxe,izs-1:ize+1) )
 
-      allocate( ax(nnx,iys:iye) )
       allocate( ay(nnx,iys:iye,izs:ize) )
+      allocate( axB(nnx,iys:iye,nblockz) )
 
-!$acc enter data create(a,b,ax,ay)
+!$acc enter data create(a,b,ay)
+!$acc enter data create(axB)
 
       ! ---- initialize the ffts
 
@@ -245,11 +247,11 @@
 
       call cufft_finalize
     
-!$acc exit data delete(a,b,ax,ay)
-
+!$acc exit data delete(a,b,ay)
+!$acc exit data delete(axB)
       deallocate(a)
       deallocate(b)
-      deallocate(ax)
+      deallocate(axB)
       deallocate(ay)
       deallocate(trigx)
       deallocate(trigc)
@@ -381,40 +383,44 @@
       dx = xl / dble(nnx)
 
       ! First look at correctness
-      do k = izs,ize
+      do k = izs,ize,nblockz
+         do k1=1,nblockz
          do j=iys,iye
          do i=1,nnx
-            a(i,j,k) = sin(dble(i-1)*dx)
-            ax(i,j) = a(i,j,k)
+            a(i,j,k+k1-1) = sin(dble(i-1)*dx)
+            axB(i,j,k1) = a(i,j,k+k1-1)
          end do
          end do
-!$acc update device(ax)
-         call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
+         end do
+!$acc update device(axB)
+         call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
 
          if(PrintTestSignal) then 
-         if (k == izs ) then
+         do k1=1,nblockz
+         if (k+k1-1 == izs ) then
            write(nprt,*)
            write(nprt,*) 'xderiv:'
 
-!$acc update host(ax)
+!$acc update host(axB)
            do i = 1,nnx
-             write(nprt,100) dble(i-1)*dx,a(i,jj,k),ax(i,jj)
+             write(nprt,100) dble(i-1)*dx,a(i,jj,k+k1-1),axB(i,jj,k1)
            enddo
  100       format(' x = ',f,' , a = ',f,' , ax = ',f)
            call flush(nprt)
          endif
+         enddo
          endif
       end do
 
       ! Next evaluate for performance
-      do concurrent (j=iys:iye,i=1:nnx)
-         a(i,j,k) = sin(dble(i-1)*dx)
-         ax(i,j) = a(i,j,k)
+      do concurrent (j=iys:iye,i=1:nnx,k1=1:nblockz)
+         a(i,j,1) = sin(dble(i-1)*dx)
+         axB(i,j,k1) = a(i,j,1)
       end do
       st = MPI_Wtime()
       do it=1,niter
-        do k = izs,ize
-          call xderivp(ax(1,iys),trigx(1,1),xk(1),nnx,iys,iye)
+        do k = izs,ize,nblockz
+          call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
         end do
       end do
       et = MPI_Wtime()
@@ -574,17 +580,17 @@
 
          ! ---- 1d fft in x over [iys,iye] for all z
 
-         do k = iz1,iz2
-            do concurrent (j=iys:iye,i=1:nx)
-               x_in(i,j) = ax(i,j,k)*fn                ! note: currently shifting one x-y slab to device
+         do k = iz1,iz2,nblockz
+            do concurrent (k1=1:nblockz,j=iys:iye,i=1:nx)
+               x_in(i,j,k1) = ax(i,j,k+k1-1)*fn                ! note: currently shifting one x-y slab to device
             enddo
 
 !$acc host_data use_device(x_in,x_out)
             ierr = cufftExecD2Z(pln_xf,x_in,x_out)        ! perform forward R2C 1D ffts in x-direction for [iys,iye]
 !$acc end host_data
 
-            do concurrent (j=iys:iye,i=1:nxp2)
-               ax(i,j,k) = x_out(i,j)                  ! note: shifting data back to host 
+            do concurrent (k1=1:nblockz,j=iys:iye,i=1:nxp2)
+               ax(i,j,k+k1-1) = x_out(i,j,k1)                  ! note: shifting data back to host 
             enddo
          enddo
 
@@ -593,21 +599,21 @@
 
          ! ---- 1d fft in y over [jxs,jxe] for all z
 
-         do k = iz1,iz2
-            do concurrent (i=jxs:jxe:2,j=1:ny)
+         do k = iz1,iz2,nblockz
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               c_in(1,j,ij) = at(j,i,k)                 ! note: shifting data to device here
-               c_in(2,j,ij) = at(j,i+1,k)
+               c_in(1,j,ij,k1) = at(j,i,k+k1-1)                 ! note: shifting data to device here
+               c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
             enddo
 
 !$acc host_data use_device(c_in,c_out)
             ierr = cufftExecZ2Z(pln_cf, c_in, c_out, CUFFT_FORWARD) ! perform forward C2C 1D ffts in y for [jxs,jxe]/2
 !$acc end host_data
 
-            do concurrent (i=jxs:jxe:2,j=1:ny)
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               at(j,i,k)   = c_out(1,j,ij)              ! note: shifting data back to host here
-               at(j,i+1,k) = c_out(2,j,ij)
+               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)              ! note: shifting data back to host here
+               at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
             enddo
          enddo
 
@@ -629,22 +635,22 @@
 
          ! ---- 1d fft in y over [jxs,jxe] for all z
 
-         do k = iz1,iz2
-            do concurrent (i=jxs:jxe:2,j=1:ny)
+         do k = iz1,iz2,nblockz
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ij = ((i-jxs)/2)+1
-               c_in(1,j,ij) = at(j,i,k)
-               c_in(2,j,ij) = at(j,i+1,k)
+               c_in(1,j,ij,k1) = at(j,i,k+k1-1)
+               c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
             enddo
 
 !$acc host_data use_device(c_in,c_out)
             ierr = cufftExecZ2Z(pln_cb, c_in, c_out, CUFFT_INVERSE)
 !$acc end host_data
 
-            do concurrent (i=jxs:jxe:2,j=1:ny)
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
                ! ij = floor(real(i-jxs)/2.0)+1
                ij = ((i-jxs)/2)+1
-               at(j,i,k)   = c_out(1,j,ij)
-               at(j,i+1,k) = c_out(2,j,ij)
+               at(j,i,k+k1-1)   = c_out(1,j,ij,k1)
+               at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
             enddo
          enddo
 
@@ -653,17 +659,17 @@
 
          ! ----  1d fft in x over [iys,iye] for all z
 
-         do k = iz1,iz2
-            do concurrent (j=iys:iye,i=1:nxp2)
-               x_out(i,j) = ax(i,j,k)               ! note: shifting data to device
+         do k = iz1,iz2,nblockz
+            do concurrent (k1=1:nblockz,j=iys:iye,i=1:nxp2)
+               x_out(i,j,k1) = ax(i,j,k+k1-1)               ! note: shifting data to device
             enddo
 
 !$acc host_data use_device(x_out)
             ierr = cufftExecZ2D(pln_xb, x_out, x_out)  ! perform backward 1D C2R ffts in x-direction for entire yz-tube
 !$acc end host_data
 
-            do concurrent (j=iys:iye,i=1:nx)
-               ax(i,j,k) = x_out(i,j)               ! note: shifting data back to host
+            do concurrent (k1=1:nblockz,j=iys:iye,i=1:nx)
+               ax(i,j,k+k1-1) = x_out(i,j,k1)               ! note: shifting data back to host
             enddo
          enddo
 
@@ -894,9 +900,10 @@
 
       use cufft
       use cufft_wrk
+      use pars, only : nblockz
 
       integer, intent(in) :: nx,iys,iye
-      real, intent(inout), dimension(nx,iys:iye) :: ax
+      real, intent(inout), dimension(nx,iys:iye,nblockz) :: ax
 
       integer :: ii2
 
@@ -904,8 +911,8 @@
 
 !     fn = 1.0/dble(nx)
       fn = 1.0
-      do concurrent (j=iys:iye,i=1:nx)
-         x_in(i,j) = ax(i,j)*fn
+      do concurrent (k1=1:nblockz,j=iys:iye,i=1:nx)
+         x_in(i,j,k1) = ax(i,j,k1)*fn
       enddo
 
       ! ---- forward 1D fft in x for all [iys,iye]
@@ -916,31 +923,31 @@
 
       ! ---- spectral derivative
 
-      do concurrent (j=iys:iye)
-         x_out2(1,j)   = 0.0
-         x_out2(2,j)   = 0.0
+      do concurrent (k1=1:nblockz,j=iys:iye)
+         x_out2(1,j,k1)   = 0.0
+         x_out2(2,j,k1)   = 0.0
       enddo
-      do concurrent (j=iys:iye,i=3:nx-1:2)
+      do concurrent (k1=1:nblockz,j=iys:iye,i=3:nx-1:2)
          ii = ((i-3)/2)+2
-         x_out2(i,j)   = -xk_d(ii)*x_out(i+1,j)
-         x_out2(i+1,j) = xk_d(ii)*x_out(i,j)
+         x_out2(i,j,k1)   = -xk_d(ii)*x_out(i+1,j,k1)
+         x_out2(i+1,j,k1) = xk_d(ii)*x_out(i,j,k1)
       enddo
-      do concurrent (j=iys:iye)
-         x_out2(nx+1,j) = 0.0
-         x_out2(nx+2,j) = 0.0
+      do concurrent (k1=1:nblockz,j=iys:iye)
+         x_out2(nx+1,j,k1) = 0.0
+         x_out2(nx+2,j,k1) = 0.0
       enddo
 
       ! ---- backward fft
 
-!$acc host_data use_device(x_out2)
-      ierr = cufftExecZ2D(pln_xb, x_out2, x_out2)
+!$acc host_data use_device(x_out2,ax)
+      ierr = cufftExecZ2D(pln_xb, x_out2, ax)
 !$acc end host_data
 
       ! ---- copy data back to host
 
-      do concurrent (j=iys:iye,i=1:nx)
-         ax(i,j) = x_out2(i,j)
-      enddo
+!      do concurrent (j=iys:iye,i=1:nx)
+!         ax(i,j) = x_out2(i,j)
+!      enddo
 
       return
       end subroutine xd_cuda
@@ -990,13 +997,13 @@
 
       ! ---- loop over z
 
-      do k = iz1,iz2
+      do k = iz1,iz2,nblockz
 
          ! ---- copy y-x slab to device
 
          fn = 1.0
-         do concurrent (i=ixs:ixe,j=1:ny)
-            y_in(j,i) = ayt(j,i,k)*fn
+         do concurrent (k1=1:nblockz,i=ixs:ixe,j=1:ny)
+            y_in(j,i,k1) = ayt(j,i,k+k1-1)*fn
          enddo
 
          ! ---- forward 1D fft in y for all [ixs:ixe]
@@ -1007,18 +1014,18 @@
 
          ! ---- spectral derivative
 
-         do concurrent (i=ixs:ixe)
-            y_out2(1,i) = 0.0
-            y_out2(2,i) = 0.0
+         do concurrent (k1=1:nblockz,i=ixs:ixe)
+            y_out2(1,i,k1) = 0.0
+            y_out2(2,i,k1) = 0.0
          enddo
-         do concurrent (i=ixs:ixe,j=3:ny-1:2)
+         do concurrent (k1=1:nblockz,i=ixs:ixe,j=3:ny-1:2)
             ii           = ((j-3)/2)+2
-            y_out2(j,i)   = -yk_d(ii)*y_out(j+1,i)
-            y_out2(j+1,i) = yk_d(ii)*y_out(j,i)
+            y_out2(j,i,k1)   = -yk_d(ii)*y_out(j+1,i,k1)
+            y_out2(j+1,i,k1) = yk_d(ii)*y_out(j,i,k1)
          enddo
-         do concurrent (i=ixs:ixe)
-            y_out2(ny+1,i) = 0.0
-            y_out2(ny+2,i) = 0.0
+         do concurrent (k1=1:nblockz,i=ixs:ixe)
+            y_out2(ny+1,i,k1) = 0.0
+            y_out2(ny+2,i,k1) = 0.0
          enddo
 
          ! ---- backward fft
@@ -1029,8 +1036,8 @@
 
          ! ---- copy data back to host
 
-         do concurrent (i=ixs:ixe,j=1:ny)
-            ayt(j,i,k) = y_out2(j,i)
+         do concurrent (k1=1:nblockz,i=ixs:ixe,j=1:ny)
+            ayt(j,i,k+k1-1) = y_out2(j,i,k1)
          enddo
 
       enddo
@@ -1125,6 +1132,10 @@
       ize = iz_e(myid)
       iss = is_s(myid)
       ise = is_e(myid)
+!$acc update device(izs,ize,ixs,ixe,jxs,jxe)
+!$acc update device(kxs,kxe,mxs,mxe,iss,ise)
+!$acc update device(iys,iye,jys,jye)
+
 
 
       write(nprt,123)myid,izs,ize,iys,iye,iss,ise
