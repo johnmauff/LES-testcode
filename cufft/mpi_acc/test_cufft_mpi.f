@@ -23,7 +23,7 @@
          integer, parameter :: nnz = 1024
 
          integer, parameter :: ncpu_s = 2
-         integer, parameter :: nblockz = 32
+         integer, parameter :: nblockz = 1
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -275,7 +275,7 @@
       integer, intent(in) :: jj
 
       real, dimension(nnx) :: ai
-      double precision :: et,st,ldt,gdt,time_forwardX,time_f
+      double precision :: et,st,ldt,gdt
       integer :: ierr
 
       ! ---- initialize array on host
@@ -304,13 +304,13 @@
 
       call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
      +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,-2,time_forwardX)
+     +           izs,ize,myid,ncpu_s,numprocs,-2)
 
       ! ---- backward transform
 
       call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
      +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,2,time_forwardX)
+     +           izs,ize,myid,ncpu_s,numprocs,2)
 
       ! ---- check ouput array
 
@@ -338,7 +338,6 @@
          end do
       end do
 
-      time_forwardX=0.0d0
       call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
@@ -346,24 +345,20 @@
 
          call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
      +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,-2,time_forwardX)
+     +           izs,ize,myid,ncpu_s,numprocs,-2)
 
          ! ---- backward transform
 
          call fft2d_mpi(a(1,iys,izs),b(1,jxs,izs),trigx(1,1),trigc,
      +           nnx,nny,jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           izs,ize,myid,ncpu_s,numprocs,2,time_forwardX)
+     +           izs,ize,myid,ncpu_s,numprocs,2)
       enddo
       et = MPI_Wtime()
       ldt = et-st
       call MPI_Allreduce(ldt,gdt,1,MPI_DOUBLE_PRECISION,
      +         MPI_MAX,MPI_COMM_WORLD,ierr)
-      call MPI_Allreduce(time_forwardX,time_f,1,MPI_DOUBLE_PRECISION,
-     +         MPI_MAX,MPI_COMM_WORLD,ierr)
       if (myid.eq.0) then
          write(6,*) 'test_fft2d: (sec) ',gdt/real(niter)
-         write(6,*) 'fft2d(forwardX): (sec) ',time_f/real(niter)
-         write(6,*) 'fft2d(forwardx): (# batch) ',(iye-iys+1)*nblockz
          call flush(6)
       endif
 
@@ -430,7 +425,7 @@
       do j=iys,iye
       do i=1,nnx
          a(i,j,1) = sin(dble(i-1)*dx)
-         axB(i,j,1+k1-1) = a(i,j,1)
+         axB(i,j,k1) = a(i,j,1)
       end do
       end do
       end do
@@ -467,7 +462,7 @@
       use timing
       include 'mpif.h'
 
-      real ::  at(nny,ixs:ixe,izs:ize)
+      real ::  at(nny,jxs:jxe,izs:ize)
       real :: ayt(nny,ixs:ixe,izs:ize)
 
       integer, intent(in) :: jj
@@ -550,17 +545,16 @@
 
       subroutine fft2d_mpi(ax,at,trigx,trigc,nx,ny,
      +           jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           iz1,iz2,myid,ncpu,np,isgn,time_forwardX)
+     +           iz1,iz2,myid,ncpu,np,isgn)
 
       ! ---- choose which fft to use for 2D fft
 
       use pars, only : i_fft
-      double precision :: time_forwardX
 
       if (i_fft == 2) then
          call fft2d_cuda(ax,at,nx,ny,
      +           jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           iz1,iz2,myid,ncpu,np,isgn,time_forwardX)
+     +           iz1,iz2,myid,ncpu,np,isgn)
       endif
 
       return
@@ -570,7 +564,7 @@
 
       subroutine fft2d_cuda(ax,at,nx,ny,
      +           jxs,jxe,jx_s,jx_e,iys,iye,iy_s,iy_e,
-     +           iz1,iz2,myid,ncpu,np,isgn,time_forwardX)
+     +           iz1,iz2,myid,ncpu,np,isgn)
 
       ! ---- get 2d fft using cuFFT routines
       !
@@ -598,8 +592,6 @@
 
       integer, dimension(0:np-1) :: jx_s,jx_e,iy_s,iy_e
       integer :: ij,k1
-      double precision :: time_forwardX
-      double precision :: et,st
 
       nxp2 = nx + 2
 
@@ -609,7 +601,7 @@
 
          ! ---- 1d fft in x over [iys,iye] for all z
 
-         st = MPI_Wtime()
+         ! st = MPI_Wtime()
          do k = iz1,iz2,nblockz
 !$acc parallel loop gang vector collapse(3) default(present)
             do k1=1,nblockz
@@ -632,8 +624,6 @@
             enddo
             enddo
          enddo
-         et = MPI_Wtime()
-         time_forwardX = time_forwardX + (et-st)
 
       ! print *,'fft2d_cuda'
          call xtoy_trans(ax,at,nxp2,ny,jxs,jxe,jx_s,jx_e,
@@ -1021,7 +1011,7 @@
 !$acc loop gang collapse(2)
       do k1=1,nblockz
       do j = iys,iye
-         ii           = 1
+         !ii           = 1
          x_out2(1,j,k1)   = 0.0
          x_out2(2,j,k1)   = 0.0
 !$acc loop worker vector

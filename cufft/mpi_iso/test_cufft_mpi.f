@@ -21,8 +21,8 @@
          integer, parameter :: nny = 1024
          integer, parameter :: nnz = 1024
 
-         integer, parameter :: ncpu_s  = 2
-         integer, parameter :: nblockz = 32
+         integer, parameter :: ncpu_s  = 1
+         integer, parameter :: nblockz = 64
 
          real, parameter :: pi2 = 8.*atan(1.0)
          real, parameter :: xl = pi2
@@ -241,10 +241,16 @@
       ! ---- perform tests
 
       jj = iys   ! index for printout
+      print *,'test_cufft: before test_xderiv'
+      call flush(6)
       call test_xderiv(jj)
       jj = jxs   ! index for printout
+      print *,'test_cufft: before test_yderiv'
+      call flush(6)
       call test_yderiv(jj)
       jj = iys   ! index for printout
+      print *,'test_cufft: before test_fft2d'
+      call flush(6)
       call test_fft2d(jj)
 
       ! ---- clean up
@@ -388,6 +394,7 @@
 
       dx = xl / dble(nnx)
 
+      ! print *,'test_xderiv: point #1'
       ! First look at correctness
       do k = izs,ize,nblockz
          do k1=1,nblockz
@@ -399,7 +406,10 @@
          end do
          end do
 !$acc update device(axB)
-         call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
+         !call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
+         ! print *,'test_xderiv: point #1.1'
+         call xderivp(axB,trigx,xk,nnx,iys,iye)
+         ! print *,'test_xderiv: point #1.2'
 
          if(PrintTestSignal) then 
          do k1=1,nblockz
@@ -418,16 +428,20 @@
          endif
       end do
 
+      ! print *,'test_xderiv: point #2'
       ! Next evaluate for performance
-      do concurrent (j=iys:iye,i=1:nnx,k1=1:nblockz)
+      do concurrent (k1=1:nblockz,j=iys:iye,i=1:nnx)
          a(i,j,1) = sin(dble(i-1)*dx)
          axB(i,j,k1) = a(i,j,1)
       end do
+      ! print *,'test_xderiv: point #3'
       call MPI_barrier(mpi_comm_world,ierr)
       st = MPI_Wtime()
       do it=1,niter
+        ! print *,'test_xderiv: point #4'
         do k = izs,ize,nblockz
-          call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
+          ! call xderivp(axB(1,iys,1),trigx(1,1),xk(1),nnx,iys,iye)
+          call xderivp(axB,trigx,xk,nnx,iys,iye)
         end do
       end do
       et = MPI_Wtime()
@@ -576,6 +590,7 @@
       !               outgoing array is ax(nx+2,iys:iye,iz1:iz2)
 
       use cufft
+      use pars, only : nblockz
       use cufft_wrk
 
       real :: ax(nx+2,iys:iye,iz1:iz2), at(ny,jxs:jxe,iz1:iz2)
@@ -611,7 +626,7 @@
          ! ---- 1d fft in y over [jxs,jxe] for all z
 
          do k = iz1,iz2,nblockz
-            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny) local(ij)
                ij = ((i-jxs)/2)+1
                c_in(1,j,ij,k1) = at(j,i,k+k1-1)                 ! fill temp variable
                c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
@@ -621,7 +636,7 @@
             ierr = cufftExecZ2Z(pln_cf, c_in, c_out, CUFFT_FORWARD) !  perform forward C2C 1D ffts in y for [jxs,jxe]/2*nblockz
 !$acc end host_data
 
-            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny) local(ij)
                ij = ((i-jxs)/2)+1
                at(j,i,k+k1-1)   = c_out(1,j,ij,k1)              ! store results
                at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
@@ -647,7 +662,7 @@
          ! ---- 1d fft in y over [jxs,jxe] for all z
 
          do k = iz1,iz2,nblockz
-            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny) local(ij)
                ij = ((i-jxs)/2)+1
                c_in(1,j,ij,k1) = at(j,i,k+k1-1)        ! fill temporary variable
                c_in(2,j,ij,k1) = at(j,i+1,k+k1-1)
@@ -657,8 +672,7 @@
             ierr = cufftExecZ2Z(pln_cb, c_in, c_out, CUFFT_INVERSE)
 !$acc end host_data
 
-            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny)
-               ! ij = floor(real(i-jxs)/2.0)+1
+            do concurrent (k1=1:nblockz,i=jxs:jxe:2,j=1:ny) local(ij)
                ij = ((i-jxs)/2)+1
                at(j,i,k+k1-1)   = c_out(1,j,ij,k1)      ! store results
                at(j,i+1,k+k1-1) = c_out(2,j,ij,k1)
@@ -825,7 +839,7 @@
       subroutine recv_xtoy(g,gt,ny,ixs,ixe,iys,iye,izs,ize)
       real g(ny,ixs:ixe,izs:ize), gt(ixs:ixe,iys:iye,izs:ize)
  
-      do concurrent (k=izs:ize,j=iys:iye,i=ixs:ixe)
+      do concurrent (k=izs:ize,i=ixs:ixe,j=iys:iye)
          g(j,i,k) = gt(i,j,k)
       enddo
 
@@ -852,7 +866,7 @@
       subroutine recv_ytox(f,ft,nx,ixs,ixe,iys,iye,izs,ize)
       real f(nx,iys:iye,izs:ize), ft(iys:iye,ixs:ixe,izs:ize)
  
-      do concurrent (k=izs:ize,i=ixs:ixe,j=iys:iye)
+      do concurrent (k=izs:ize,j=iys:iye,i=ixs:ixe)
          f(i,j,k) = ft(j,i,k)
       enddo
 
@@ -937,15 +951,13 @@
       do concurrent (k1=1:nblockz,j=iys:iye)
          x_out2(1,j,k1)   = 0.0
          x_out2(2,j,k1)   = 0.0
+         x_out2(nx+1,j,k1) = 0.0
+         x_out2(nx+2,j,k1) = 0.0
       enddo
-      do concurrent (k1=1:nblockz,j=iys:iye,i=3:nx-1:2)
+      do concurrent (k1=1:nblockz,j=iys:iye,i=3:nx-1:2) local(ii)
          ii = ((i-3)/2)+2
          x_out2(i,j,k1)   = -xk_d(ii)*x_out(i+1,j,k1)
          x_out2(i+1,j,k1) = xk_d(ii)*x_out(i,j,k1)
-      enddo
-      do concurrent (k1=1:nblockz,j=iys:iye)
-         x_out2(nx+1,j,k1) = 0.0
-         x_out2(nx+2,j,k1) = 0.0
       enddo
 
       ! ---- backward fft
@@ -1023,15 +1035,13 @@
          do concurrent (k1=1:nblockz,i=ixs:ixe)
             y_out2(1,i,k1) = 0.0
             y_out2(2,i,k1) = 0.0
+            y_out2(ny+1,i,k1) = 0.0
+            y_out2(ny+2,i,k1) = 0.0
          enddo
-         do concurrent (k1=1:nblockz,i=ixs:ixe,j=3:ny-1:2)
+         do concurrent (k1=1:nblockz,i=ixs:ixe,j=3:ny-1:2) local(ii)
             ii           = ((j-3)/2)+2
             y_out2(j,i,k1)   = -yk_d(ii)*y_out(j+1,i,k1)
             y_out2(j+1,i,k1) = yk_d(ii)*y_out(j,i,k1)
-         enddo
-         do concurrent (k1=1:nblockz,i=ixs:ixe)
-            y_out2(ny+1,i,k1) = 0.0
-            y_out2(ny+2,i,k1) = 0.0
          enddo
 
          ! ---- backward fft
