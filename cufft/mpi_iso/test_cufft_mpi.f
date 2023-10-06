@@ -10,7 +10,7 @@
 ! ======================================================================
       module timing
           integer, parameter :: niter=100
-          logical, parameter :: PrintTestSignal=.false.
+          logical, parameter :: PrintTestSignal=.true.
       end module timing
 
       module pars
@@ -414,21 +414,21 @@
          call xderivp(axB,trigx,xk,nnx,iys,iye)
          ! print *,'test_xderiv: point #1.2'
 !
-!         if(PrintTestSignal) then 
-!         do k1=1,bsizez
-!         if (k+k1-1 == izs ) then
-!           write(nprt,*)
-!           write(nprt,*) 'xderiv:'
-!
-!!$acc update host(axB)
-!           do i = 1,nnx
-!             write(nprt,100) dble(i-1)*dx,a(i,jj,k+k1-1),axB(i,jj,k1)
-!           enddo
-! 100       format(' x = ',f,' , a = ',f,' , ax = ',f)
-!           call flush(nprt)
-!         endif
-!         enddo
-!         endif
+         if(PrintTestSignal) then 
+         do k1=1,bsizez
+         if (k+k1-1 == izs ) then
+           write(nprt,*)
+           write(nprt,*) 'xderiv:'
+
+!$acc update host(axB)
+           do i = 1,nnx
+             write(nprt,100) dble(i-1)*dx,a(i,jj,k+k1-1),axB(i,jj,k1)
+           enddo
+ 100       format(' x = ',f,' , a = ',f,' , ax = ',f)
+           call flush(nprt)
+         endif
+         enddo
+         endif
       end do
 
 !      ! print *,'test_xderiv: point #2'
@@ -505,24 +505,21 @@
 
 !$acc data copyout(at,ayt)
 
-      call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
+        call xtoy_trans(a(1,iys,izs),at,nnx+2,nny,jxs,jxe,jx_s,jx_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
-      call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
+        call xtoy_trans(ay,ayt,nnx,nny,ixs,ixe,ix_s,ix_e,
      +         iys,iye,iy_s,iy_e,izs,ize,myid,ncpu_s,numprocs)
 !$acc end data
 
-      do i=1,nnx
-         if (i==jj) then
-            write(nprt,*)
-            write(nprt,*) 'yderiv:'
+        write(nprt,*)
+        write(nprt,*) 'yderiv:'
+        do j = 1,nny
+          ! write(nprt,100) dble(j-1)*dy,at(j,jxs,izs),ayt(j,ixs,izs)
+          write(nprt,100) dble(j-1)*dy,at(j,jj,izs),ayt(j,ixs,izs)
+        enddo
+ 100  format(' y = ',f,' , a = ',f,' , ay = ',f)
+        call flush(nprt)
 
-            do j = 1,nny
-              write(nprt,100) dble(j-1)*dy,at(j,i,1),ayt(j,i,1)
-            enddo
- 100        format(' y = ',f,' , a = ',f,' , ay = ',f)
-            call flush(nprt)
-         endif
-      enddo
       endif
       ! next measure performance
       ! Initialize on the GPU 
